@@ -65,7 +65,6 @@ async def process_video(req: VideoRequest):
     target_info = LANG_OPTIONS.get(req.target_lang, LANG_OPTIONS["ko"])
     voice_name = target_info["female"] if req.gender == "female" else target_info["male"]
 
-    # URL 전처리 (https: 누락 시 자동 보정)
     raw_url = req.url.strip()
     if raw_url.startswith("//"):
         raw_url = "https:" + raw_url
@@ -83,7 +82,7 @@ async def process_video(req: VideoRequest):
     audio_clips = []
 
     try:
-        # 1. 유튜브 다운로드 (봇 감지 차단 우회 옵션 적용: android_creator / mweb 클라이언트 지정)
+        # 1. 유튜브 다운로드 (TV/iOS 임베디드 클라이언트로 봇 검증 우회)
         stage = "1단계: 유튜브 다운로드"
         out_tmpl = os.path.join(task_dir, "input.%(ext)s")
         ydl_opts = {
@@ -94,7 +93,8 @@ async def process_video(req: VideoRequest):
             'no_check_certificates': True,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web']
+                    'player_client': ['tv_embedded', 'ios', 'android_creator'],
+                    'player_skip': ['webpage', 'configs']
                 }
             }
         }
