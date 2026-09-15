@@ -65,7 +65,14 @@ async def process_video(req: VideoRequest):
     target_info = LANG_OPTIONS.get(req.target_lang, LANG_OPTIONS["ko"])
     voice_name = target_info["female"] if req.gender == "female" else target_info["male"]
 
-    task_id = str(abs(hash(req.url + req.target_lang)))
+    # URL 전처리 (https: 누락 시 자동 보정)
+    raw_url = req.url.strip()
+    if raw_url.startswith("//"):
+        raw_url = "https:" + raw_url
+    elif not raw_url.startswith("http"):
+        raw_url = "https://" + raw_url
+
+    task_id = str(abs(hash(raw_url + req.target_lang)))
     task_dir = os.path.join(WORK_DIR, task_id)
     os.makedirs(task_dir, exist_ok=True)
 
@@ -76,19 +83,23 @@ async def process_video(req: VideoRequest):
     audio_clips = []
 
     try:
-        # 1. 유튜브 다운로드
+        # 1. 유튜브 다운로드 (봇 감지 차단 우회 옵션 적용: android_creator / mweb 클라이언트 지정)
         stage = "1단계: 유튜브 다운로드"
         out_tmpl = os.path.join(task_dir, "input.%(ext)s")
         ydl_opts = {
-            'format': 'best[ext=mp4]/best',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': out_tmpl,
             'quiet': True,
             'overwrites': True,
             'no_check_certificates': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web']
+                }
+            }
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(req.url, download=True)
+            info = ydl.extract_info(raw_url, download=True)
             video_file = ydl.prepare_filename(info)
 
         # 2. 오디오 분리
