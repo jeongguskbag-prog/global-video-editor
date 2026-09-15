@@ -8,5 +8,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
-EXPOSE 10000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "10000"]
+# Render가 동적으로 부여하는 PORT 환경변수를 읽어서 실행
+CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000}"
