@@ -5,7 +5,7 @@ import urllib.request
 import urllib.parse
 import json
 import traceback
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import yt_dlp
@@ -69,13 +69,15 @@ async def process_video(req: VideoRequest):
     task_dir = os.path.join(WORK_DIR, task_id)
     os.makedirs(task_dir, exist_ok=True)
 
+    stage = "시작 전"
     video_clip = None
     silent_video = None
     final_clip = None
     audio_clips = []
 
     try:
-        # 1. 유튜브 다운로드 (클라우드 IP 차단 방지 옵션 적용)
+        # 1. 유튜브 다운로드
+        stage = "1단계: 유튜브 다운로드"
         out_tmpl = os.path.join(task_dir, "input.%(ext)s")
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
@@ -89,7 +91,8 @@ async def process_video(req: VideoRequest):
             info = ydl.extract_info(req.url, download=True)
             video_file = ydl.prepare_filename(info)
 
-        # 2. 오디오 추출
+        # 2. 오디오 분리
+        stage = "2단계: 오디오 추출"
         audio_path = os.path.join(task_dir, "audio.wav")
         video_clip = VideoFileClip(video_file)
         total_dur = video_clip.duration
@@ -97,16 +100,16 @@ async def process_video(req: VideoRequest):
 
         silent_video = video_clip.without_audio()
 
-        # 3. Whisper STT (초경량 tiny 사용 후 메모리 즉시 해제)
+        # 3. Whisper STT
+        stage = "3단계: 음성인식(Whisper)"
         whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
         segments, _ = whisper_model.transcribe(audio_path, beam_size=1, vad_filter=False)
         segment_list = list(segments)
-        
-        # 모델 메모리 반환
         del whisper_model
         gc.collect()
 
         # 4. 더빙 합성
+        stage = "4단계: 번역 및 TTS 합성"
         silent_base = AudioClip(lambda t: [0, 0], duration=total_dur, fps=44100)
         audio_clips.append(silent_base)
 
@@ -125,7 +128,8 @@ async def process_video(req: VideoRequest):
         final_audio = CompositeAudioClip(audio_clips)
         final_clip = silent_video.set_audio(final_audio)
 
-        # 5. 비디오 렌더링 (메모리 절약 옵션 적용)
+        # 5. 인코딩
+        stage = "5단계: 최종 영상 인코딩"
         output_path = os.path.join(task_dir, "output.mp4")
         final_clip.write_videofile(
             output_path,
@@ -140,13 +144,11 @@ async def process_video(req: VideoRequest):
         return FileResponse(output_path, media_type="video/mp4", filename=f"translated_{req.target_lang}.mp4")
 
     except Exception as e:
-        error_msg = traceback.format_exc()
-        print(f"Error occurred: {error_msg}")
-        # 구체적인 에러 내용을 클라이언트에 전달
-        return JSONResponse(status_code=500, content={"error": str(e), "detail": error_msg[:300]})
+        error_detail = f"[{stage}] 에러: {str(e)}"
+        print(error_detail)
+        return JSONResponse(status_code=500, content={"error": error_detail})
 
     finally:
-        # 리소스 정리
         try:
             if video_clip: video_clip.close()
             if silent_video: silent_video.close()
