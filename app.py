@@ -39,15 +39,11 @@ class VideoRequest(BaseModel):
     target_lang: str = "ko"
     gender: str = "female"
 
-def clean_and_normalize_youtube_url(url: str) -> str:
-    """쇼츠나 추적 파라미터(?si=...)가 붙은 주소를 일반 표준 URL로 변환"""
-    # 1. 11자리 비디오 ID 추출
-    pattern = r'(?:v=|\/shorts\/|youtu\.be\/|embed\/|\/v\/)([0-9A-Za-z_-]{11})'
-    match = re.search(pattern, url)
+def clean_youtube_url(url: str) -> str:
+    """쇼츠 URL 및 추적 파라미터(?si=...) 정리"""
+    match = re.search(r'(?:v=|\/shorts\/|youtu\.be\/|embed\/)([0-9A-Za-z_-]{11})', url)
     if match:
-        video_id = match.group(1)
-        # 봇 탐지율이 낮은 표준 재생 URL로 강제 변환
-        return f"https://www.youtube.com/watch?v={video_id}"
+        return f"https://www.youtube.com/watch?v={match.group(1)}"
     return url.split('?')[0].strip()
 
 def translate_text(text, target_code):
@@ -77,8 +73,8 @@ async def process_video(req: VideoRequest):
     target_info = LANG_OPTIONS.get(req.target_lang, LANG_OPTIONS["ko"])
     voice_name = target_info["female"] if req.gender == "female" else target_info["male"]
 
-    # 1. URL 정규화 (쇼츠 및 파라미터 완전 제거)
-    target_url = clean_and_normalize_youtube_url(req.url)
+    # 1. URL 정리
+    target_url = clean_youtube_url(req.url)
 
     task_id = str(abs(hash(target_url + req.target_lang)))
     task_dir = os.path.join(WORK_DIR, task_id)
@@ -91,7 +87,7 @@ async def process_video(req: VideoRequest):
     audio_clips = []
 
     try:
-        # 1. 유튜브 다운로드 (표준 Web 및 모바일 Fallback)
+        # 1. 유튜브 다운로드 (android_creator 클라이언트 단독 지정으로 봇 감지 우회)
         stage = "1단계: 유튜브 다운로드"
         out_tmpl = os.path.join(task_dir, "input.%(ext)s")
         ydl_opts = {
@@ -100,10 +96,9 @@ async def process_video(req: VideoRequest):
             'quiet': True,
             'overwrites': True,
             'no_check_certificates': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['web', 'mweb']
+                    'player_client': ['android_creator']
                 }
             }
         }
@@ -120,7 +115,7 @@ async def process_video(req: VideoRequest):
 
         silent_video = video_clip.without_audio()
 
-        # 3. Whisper STT
+        # 3. Whisper STT (초경량 tiny 사용 후 즉각 메모리 반환)
         stage = "3단계: 음성인식(Whisper)"
         whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
         segments, _ = whisper_model.transcribe(audio_path, beam_size=1, vad_filter=False)
@@ -128,7 +123,7 @@ async def process_video(req: VideoRequest):
         del whisper_model
         gc.collect()
 
-        # 4. 더빙 합성
+        # 4. 번역 및 더빙 음성 생성
         stage = "4단계: 번역 및 TTS 합성"
         silent_base = AudioClip(lambda t: [0, 0], duration=total_dur, fps=44100)
         audio_clips.append(silent_base)
@@ -148,7 +143,7 @@ async def process_video(req: VideoRequest):
         final_audio = CompositeAudioClip(audio_clips)
         final_clip = silent_video.set_audio(final_audio)
 
-        # 5. 인코딩
+        # 5. 비디오 렌더링
         stage = "5단계: 최종 영상 인코딩"
         output_path = os.path.join(task_dir, "output.mp4")
         final_clip.write_videofile(
