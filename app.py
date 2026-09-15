@@ -39,47 +39,16 @@ class VideoRequest(BaseModel):
     target_lang: str = "ko"
     gender: str = "female"
 
-def extract_video_id(url: str) -> str:
-    """유튜브 링크에서 11자리 비디오 ID 추출"""
-    patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'(?:shorts\/)([0-9A-Za-z_-]{11})',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})'
-    ]
-    for p in patterns:
-        m = re.search(p, url)
-        if m:
-            return m.group(1)
-    return ""
-
-def download_via_invidious(v_id: str, out_path: str) -> bool:
-    """공개 Invidious 인스턴스를 통해 봇 차단 없이 직접 비디오 스트림 다운로드"""
-    instances = [
-        "https://inv.tux.pizza",
-        "https://invidious.nerdvpn.de",
-        "https://yt.drgnz.club",
-        "https://invidious.private.coffee"
-    ]
-    for inst in instances:
-        try:
-            api_url = f"{inst}/api/v1/videos/{v_id}"
-            req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=7) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                formats = data.get("formatStreams", [])
-                if not formats:
-                    continue
-                # 영상+오디오가 함께 합쳐진 MP4 포맷 선택
-                stream_url = formats[-1].get("url")
-                if stream_url:
-                    v_req = urllib.request.Request(stream_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(v_req, timeout=20) as v_resp, open(out_path, 'wb') as f:
-                        f.write(v_resp.read())
-                    if os.path.exists(out_path) and os.path.getsize(out_path) > 10000:
-                        return True
-        except Exception:
-            continue
-    return False
+def clean_and_normalize_youtube_url(url: str) -> str:
+    """쇼츠나 추적 파라미터(?si=...)가 붙은 주소를 일반 표준 URL로 변환"""
+    # 1. 11자리 비디오 ID 추출
+    pattern = r'(?:v=|\/shorts\/|youtu\.be\/|embed\/|\/v\/)([0-9A-Za-z_-]{11})'
+    match = re.search(pattern, url)
+    if match:
+        video_id = match.group(1)
+        # 봇 탐지율이 낮은 표준 재생 URL로 강제 변환
+        return f"https://www.youtube.com/watch?v={video_id}"
+    return url.split('?')[0].strip()
 
 def translate_text(text, target_code):
     if not text or len(text.strip()) < 2:
@@ -108,14 +77,10 @@ async def process_video(req: VideoRequest):
     target_info = LANG_OPTIONS.get(req.target_lang, LANG_OPTIONS["ko"])
     voice_name = target_info["female"] if req.gender == "female" else target_info["male"]
 
-    raw_url = req.url.strip()
-    if raw_url.startswith("//"):
-        raw_url = "https:" + raw_url
-    elif not raw_url.startswith("http"):
-        raw_url = "https://" + raw_url
+    # 1. URL 정규화 (쇼츠 및 파라미터 완전 제거)
+    target_url = clean_and_normalize_youtube_url(req.url)
 
-    v_id = extract_video_id(raw_url)
-    task_id = str(abs(hash(raw_url + req.target_lang)))
+    task_id = str(abs(hash(target_url + req.target_lang)))
     task_dir = os.path.join(WORK_DIR, task_id)
     os.makedirs(task_dir, exist_ok=True)
 
@@ -126,32 +91,25 @@ async def process_video(req: VideoRequest):
     audio_clips = []
 
     try:
-        # 1. 유튜브 다운로드 (프록시 API 우선 시도 -> 실패 시 Web 클라이언트 Fallback)
+        # 1. 유튜브 다운로드 (표준 Web 및 모바일 Fallback)
         stage = "1단계: 유튜브 다운로드"
-        video_file = os.path.join(task_dir, "input.mp4")
-
-        download_ok = False
-        if v_id:
-            download_ok = download_via_invidious(v_id, video_file)
-
-        if not download_ok:
-            out_tmpl = os.path.join(task_dir, "input.%(ext)s")
-            ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                'outtmpl': out_tmpl,
-                'quiet': True,
-                'overwrites': True,
-                'no_check_certificates': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web_embedded', 'web'],
-                        'player_skip': ['configs']
-                    }
+        out_tmpl = os.path.join(task_dir, "input.%(ext)s")
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': out_tmpl,
+            'quiet': True,
+            'overwrites': True,
+            'no_check_certificates': True,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web', 'mweb']
                 }
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(raw_url, download=True)
-                video_file = ydl.prepare_filename(info)
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(target_url, download=True)
+            video_file = ydl.prepare_filename(info)
 
         # 2. 오디오 분리
         stage = "2단계: 오디오 추출"
