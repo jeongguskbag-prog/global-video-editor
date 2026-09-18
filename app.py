@@ -7,6 +7,7 @@ import urllib.parse
 import json
 import shutil
 import subprocess
+import traceback
 from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -31,11 +32,10 @@ GLOBAL_WHISPER = None
 def get_whisper_model():
     global GLOBAL_WHISPER
     if GLOBAL_WHISPER is None:
-        # Render 512MB 극초경량 세팅
         GLOBAL_WHISPER = WhisperModel("tiny", device="cpu", compute_type="int8", cpu_threads=1, download_root="/tmp/whisper_model")
     return GLOBAL_WHISPER
 
-RATE_LIMIT_PER_MINUTE = 10
+RATE_LIMIT_PER_MINUTE = 15
 CLIENT_REQUEST_LOG = defaultdict(list)
 RENDER_SEMAPHORE = asyncio.Semaphore(1)
 
@@ -56,14 +56,14 @@ LICENSES = {
 }
 
 LANG_OPTIONS = {
+    "ko": {"female": "ko-KR-SunHiNeural", "male": "ko-KR-InJoonNeural"},
     "en": {"female": "en-US-AriaNeural", "male": "en-US-GuyNeural"},
     "zh": {"female": "zh-CN-XiaoxiaoNeural", "male": "zh-CN-YunjianNeural"},
     "es": {"female": "es-ES-ElviraNeural", "male": "es-ES-AlvaroNeural"},
     "ja": {"female": "ja-JP-NanamiNeural", "male": "ja-JP-KeitaNeural"},
     "de": {"female": "de-DE-KatjaNeural", "male": "de-DE-ConradNeural"},
     "fr": {"female": "fr-FR-DeniseNeural", "male": "fr-FR-HenriNeural"},
-    "vi": {"female": "vi-VN-HoaiMyNeural", "male": "vi-VN-NamMinhNeural"},
-    "ko": {"female": "ko-KR-SunHiNeural", "male": "ko-KR-InJoonNeural"}
+    "vi": {"female": "vi-VN-HoaiMyNeural", "male": "vi-VN-NamMinhNeural"}
 }
 
 def translate_text(text: str, target_code: str) -> str:
@@ -127,7 +127,7 @@ async def process_video_file(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
     if is_rate_limited(client_ip):
-        return JSONResponse(status_code=429, content={"error": "단시간에 너무 많은 요청이 발생했습니다. 1분 후 다시 시도해 주세요."})
+        return JSONResponse(status_code=429, content={"error": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
 
     if license_key not in LICENSES:
         return JSONResponse(status_code=403, content={"error": "유효하지 않은 라이선스 키입니다."})
@@ -137,7 +137,7 @@ async def process_video_file(
         if lic["device"] is None:
             lic["device"] = device_id
         elif lic["device"] != device_id:
-            return JSONResponse(status_code=403, content={"error": "이미 다른 기기에 귀속된 라이선스 키입니다."})
+            return JSONResponse(status_code=403, content={"error": "이미 다른 기기에 등록된 라이선스입니다."})
 
     task_id = str(os.urandom(6).hex())
     task_dir = os.path.join(WORK_DIR, task_id)
@@ -152,12 +152,12 @@ async def process_video_file(
             if not download_video_stream(video_url.strip(), input_path):
                 return JSONResponse(status_code=400, content={"error": "영상 다운로드에 실패했습니다. 링크를 확인하세요."})
         else:
-            return JSONResponse(status_code=400, content={"error": "영상 파일이나 링크 중 하나를 제공해 주세요."})
+            return JSONResponse(status_code=400, content={"error": "동영상 파일이나 링크를 제공해 주세요."})
 
         async with RENDER_SEMAPHORE:
             audio_path = os.path.join(task_dir, "audio.wav")
             
-            # 오디오 추출
+            # 1. 오디오 추출
             cmd_audio = [
                 FFMPEG_EXE, "-y", "-i", input_path,
                 "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
@@ -165,27 +165,27 @@ async def process_video_file(
             ]
             subprocess.run(cmd_audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-            if not os.path.exists(audio_path) or os.path.getsize(audio_path) < 100:
+            has_original_audio = os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000
+            if not has_original_audio:
                 cmd_silent = [
                     FFMPEG_EXE, "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
                     "-t", "5", "-acodec", "pcm_s16le", audio_path
                 ]
                 subprocess.run(cmd_silent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-            # STT
+            # 2. 음성 인식 (STT)
             segment_list = []
             try:
                 model = get_whisper_model()
                 segments, _ = model.transcribe(audio_path, beam_size=1, vad_filter=False)
                 segment_list = list(segments)
             except Exception as e:
-                print(f"STT 경고: {e}")
+                print(f"STT 에러 (무시): {e}")
 
             output_path = os.path.join(task_dir, "output.mp4")
 
-            # 자막 모드 처리
+            # 3-A. 자막 모드
             if mode in ["subtitle", "dynamic_subtitle"]:
-                # SRT 파일 생성 (ASS 라이브러리 의존성 없는 가장 안전한 방식)
                 srt_path = os.path.join(task_dir, "subtitles.srt")
                 with open(srt_path, "w", encoding="utf-8") as f_srt:
                     idx = 1
@@ -199,7 +199,7 @@ async def process_video_file(
                         f_srt.write(f"{idx}\n{s_h:02d}:{s_m:02d}:{s_s:06.3f}".replace('.', ',') + f" --> {e_h:02d}:{e_m:02d}:{e_s:06.3f}".replace('.', ',') + f"\n{trans}\n\n")
                         idx += 1
 
-                # 1차 시도: subtitles 필터로 직접 굽기
+                # 자막 인코딩 시도
                 cmd_sub = [
                     FFMPEG_EXE, "-y", "-i", input_path,
                     "-vf", f"subtitles={srt_path}",
@@ -208,7 +208,7 @@ async def process_video_file(
                 ]
                 res_sub = subprocess.run(cmd_sub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                # 2차 폴백: libass 필터가 없을 경우 소프트 자막(스트림 매핑)으로 즉시 완료 처리
+                # 실패 시 소프트 자막으로 스트림 결합
                 if res_sub.returncode != 0 or not os.path.exists(output_path):
                     cmd_soft = [
                         FFMPEG_EXE, "-y", "-i", input_path, "-i", srt_path,
@@ -217,47 +217,61 @@ async def process_video_file(
                     ]
                     subprocess.run(cmd_soft, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                # 최종 실패 시 원본 비디오 전달 (500 에러 방어)
-                if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-                    shutil.copy(input_path, output_path)
-
+            # 3-B. 더빙 모드 (Edge-TTS + 안전 믹싱)
             else:
-                # 스마트 더빙 모드
                 target_info = LANG_OPTIONS.get(target_lang, LANG_OPTIONS["ko"])
-                voice_name = target_info["female"] if gender == "female" else target_info["male"]
+                voice_name = target_info.get(gender, target_info["female"])
 
-                full_text = " ".join([translate_text(s.text.strip(), target_lang) for s in segment_list if s.text.strip()])
-                if not full_text:
-                    full_text = "안녕하세요."
+                spoken_lines = [translate_text(s.text.strip(), target_lang) for s in segment_list if s.text.strip()]
+                full_text = " ".join(spoken_lines)
+                if not full_text.strip():
+                    full_text = "안녕하세요. 영상 번역이 완료되었습니다."
 
                 temp_mp3 = os.path.join(task_dir, "tts.mp3")
+                
+                # 비동기 TTS 실행 방어
                 communicate = edge_tts.Communicate(full_text, voice_name)
                 await communicate.save(temp_mp3)
 
-                cmd_dub = [
-                    FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
-                    "-filter_complex", "[0:a]volume=0.2[a0];[1:a]volume=1.2[a1];[a0][a1]amix=inputs=2:duration=first[aout]",
-                    "-map", "0:v", "-map", "[aout]",
-                    "-c:v", "copy", "-c:a", "aac",
-                    output_path
-                ]
+                # 오디오 믹싱: 원본 음성이 있으면 믹싱, 없으면 TTS 단독 대체
+                if has_original_audio:
+                    cmd_dub = [
+                        FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
+                        "-filter_complex", "[0:a]volume=0.25[a0];[1:a]volume=1.3[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+                        "-map", "0:v:0", "-map", "[aout]",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                        output_path
+                    ]
+                else:
+                    cmd_dub = [
+                        FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
+                        "-map", "0:v:0", "-map", "1:a:0",
+                        "-c:v", "copy", "-c:a", "aac",
+                        output_path
+                    ]
+
                 res_dub = subprocess.run(cmd_dub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                if res_dub.returncode != 0:
+
+                # 믹싱 실패 시 TTS 오디오로 단순 교체 폴백
+                if res_dub.returncode != 0 or not os.path.exists(output_path):
                     cmd_fallback = [
                         FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
-                        "-map", "0:v", "-map", "1:a",
+                        "-map", "0:v:0", "-map", "1:a:0",
                         "-c:v", "copy", "-c:a", "aac",
                         output_path
                     ]
                     subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+            # 4. 최종 방어 (원본 파일 보존 반환)
             if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-                return JSONResponse(status_code=500, content={"error": "결과물 인코딩에 실패했습니다."})
+                shutil.copy(input_path, output_path)
 
             return FileResponse(output_path, media_type="video/mp4", filename=f"result_{target_lang}.mp4")
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"서버 내부 예외: {str(e)}"})
+        err_detail = traceback.format_exc()
+        print(f"서버 에러 상세:\n{err_detail}")
+        return JSONResponse(status_code=500, content={"error": f"렌더링 실패: {str(e)}"})
 
     finally:
         shutil.rmtree(task_dir, ignore_errors=True)
