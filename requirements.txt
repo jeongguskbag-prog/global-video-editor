@@ -1,9 +1,8 @@
 fastapi
 uvicorn
-yt-dlp
+python-multipart
 edge-tts
 deep-translator
 faster-whisper
-moviepy==1.0.3
-imageio-ffmpeg
-pydantic
+requests
+yt-dlp
