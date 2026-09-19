@@ -1,0 +1,25 @@
+name: global_futures_terminal
+description: Global futures trading terminal prototype (multi-exchange live price feed, credit-based tool paywall).
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  crypto: ^3.0.3
+  flutter_secure_storage: ^9.2.2
+  web_socket_channel: ^2.4.5
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
