@@ -106,6 +106,37 @@ def translate_text(text: str, target_code: str) -> str:
 def root():
     return {"status": "ok", "service": "AI Global Video Editor Running"}
 
+def check_license(license_key: str, device_id: str):
+    """Returns None if valid, or a JSONResponse with the error if not."""
+    if license_key not in LICENSES:
+        return JSONResponse(status_code=403, content={"error": "유효하지 않은 라이선스 키입니다."})
+
+    lic = LICENSES[license_key]
+    if not (MASTER_LICENSE_KEY and license_key == MASTER_LICENSE_KEY):
+        if lic["device"] is None:
+            lic["device"] = device_id
+        elif lic["device"] != device_id:
+            return JSONResponse(status_code=403, content={"error": "이미 다른 기기에 등록된 라이선스입니다."})
+    return None
+
+@app.post("/api/verify_license")
+@app.post("/api/verify_license/")
+async def verify_license(
+    request: Request,
+    license_key: str = Form(""),
+    device_id: str = Form("UNKNOWN_DEVICE")
+):
+    """Lightweight check used by clients that render locally (e.g. the Android app's
+    on-device pipeline) and only need to confirm the license before proceeding."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if is_rate_limited(client_ip):
+        return JSONResponse(status_code=429, content={"error": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
+
+    err = check_license(license_key, device_id)
+    if err:
+        return err
+    return {"valid": True}
+
 @app.post("/api/render_file")
 @app.post("/api/render_file/")
 @app.post("/render_file")
@@ -122,15 +153,9 @@ async def process_video_file(
     if is_rate_limited(client_ip):
         return JSONResponse(status_code=429, content={"error": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
 
-    if license_key not in LICENSES:
-        return JSONResponse(status_code=403, content={"error": "유효하지 않은 라이선스 키입니다."})
-
-    lic = LICENSES[license_key]
-    if not (MASTER_LICENSE_KEY and license_key == MASTER_LICENSE_KEY):
-        if lic["device"] is None:
-            lic["device"] = device_id
-        elif lic["device"] != device_id:
-            return JSONResponse(status_code=403, content={"error": "이미 다른 기기에 등록된 라이선스입니다."})
+    err = check_license(license_key, device_id)
+    if err:
+        return err
 
     task_id = str(os.urandom(6).hex())
     task_dir = os.path.join(WORK_DIR, task_id)
