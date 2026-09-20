@@ -45,4 +45,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.8")
+    implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
 }
