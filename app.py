@@ -49,12 +49,15 @@ def is_rate_limited(client_ip: str) -> bool:
     CLIENT_REQUEST_LOG[client_ip].append(now)
     return False
 
+MASTER_LICENSE_KEY = os.environ.get("MASTER_LICENSE_KEY", "")
+
 LICENSES = {
-    "DEV-MASTER-FREEPASS": {"owner": "Developer", "device": None},
     "VIP-KEY-001": {"owner": "User1", "device": None},
     "VIP-KEY-002": {"owner": "User2", "device": None},
     "VIP-KEY-003": {"owner": "User3", "device": None}
 }
+if MASTER_LICENSE_KEY:
+    LICENSES[MASTER_LICENSE_KEY] = {"owner": "Developer", "device": None}
 
 LANG_OPTIONS = {
     "ko": {"female": "ko-KR-SunHiNeural", "male": "ko-KR-InJoonNeural"},
@@ -123,7 +126,7 @@ async def process_video_file(
     target_lang: str = Form("ko"),
     gender: str = Form("female"),
     mode: str = Form("dynamic_subtitle"),
-    license_key: str = Form("DEV-MASTER-FREEPASS"),
+    license_key: str = Form(""),
     device_id: str = Form("UNKNOWN_DEVICE")
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -134,7 +137,7 @@ async def process_video_file(
         return JSONResponse(status_code=403, content={"error": "유효하지 않은 라이선스 키입니다."})
 
     lic = LICENSES[license_key]
-    if license_key != "DEV-MASTER-FREEPASS":
+    if not (MASTER_LICENSE_KEY and license_key == MASTER_LICENSE_KEY):
         if lic["device"] is None:
             lic["device"] = device_id
         elif lic["device"] != device_id:

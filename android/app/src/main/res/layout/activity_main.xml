@@ -48,7 +48,6 @@
                 android:id="@+id/editLicenseKey"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="DEV-MASTER-FREEPASS"
                 android:singleLine="true" />
         </com.google.android.material.textfield.TextInputLayout>
 

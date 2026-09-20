@@ -72,7 +72,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.editServerUrl.setText(prefs.getString("server_url", ""))
-        binding.editLicenseKey.setText(prefs.getString("license_key", "DEV-MASTER-FREEPASS"))
+        binding.editLicenseKey.setText(prefs.getString("license_key", ""))
 
         binding.spinnerLanguage.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageLabels)
         binding.spinnerMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modeLabels)
@@ -111,11 +111,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRender() {
         val serverUrl = binding.editServerUrl.text?.toString()?.trim()?.trimEnd('/') ?: ""
-        val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty().ifBlank { "DEV-MASTER-FREEPASS" }
+        val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty()
         val videoUrl = binding.editVideoUrl.text?.toString()?.trim().orEmpty()
 
         if (serverUrl.isBlank()) {
             toast("서버 주소를 입력해 주세요")
+            return
+        }
+        if (licenseKey.isBlank()) {
+            toast("라이선스 키를 입력해 주세요")
             return
         }
         if (selectedVideoUri == null && videoUrl.isBlank()) {

@@ -1,0 +1,14 @@
+{
+  "name": "global-video-editor",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "postCreateCommand": "pip install -r requirements.txt",
+  "postStartCommand": "nohup uvicorn app:app --host 0.0.0.0 --port 10000 > /tmp/uvicorn.log 2>&1 &",
+  "forwardPorts": [10000],
+  "portsAttributes": {
+    "10000": {
+      "label": "Global Video Editor API",
+      "visibility": "public",
+      "onAutoForward": "notify"
+    }
+  }
+}
