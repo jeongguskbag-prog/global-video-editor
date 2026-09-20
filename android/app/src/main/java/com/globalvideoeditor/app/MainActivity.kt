@@ -36,6 +36,10 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val SERVER_URL = "https://global-video-editor.onrender.com"
+    }
+
     private lateinit var binding: ActivityMainBinding
     private val prefs by lazy { getSharedPreferences("gve_prefs", MODE_PRIVATE) }
 
@@ -78,7 +82,6 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.editServerUrl.setText(prefs.getString("server_url", ""))
         binding.editLicenseKey.setText(prefs.getString("license_key", ""))
 
         binding.spinnerLanguage.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageLabels)
@@ -133,13 +136,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRender() {
-        val serverUrl = binding.editServerUrl.text?.toString()?.trim()?.trimEnd('/') ?: ""
         val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty()
 
-        if (serverUrl.isBlank()) {
-            toast("서버 주소를 입력해 주세요")
-            return
-        }
         if (licenseKey.isBlank()) {
             toast("라이선스 키를 입력해 주세요")
             return
@@ -149,7 +147,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        prefs.edit().putString("server_url", serverUrl).putString("license_key", licenseKey).apply()
+        prefs.edit().putString("license_key", licenseKey).apply()
 
         val langCode = languageCodes[binding.spinnerLanguage.selectedItemPosition]
         val modeCode = modeCodes[binding.spinnerMode.selectedItemPosition]
@@ -175,7 +173,7 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 val request = Request.Builder()
-                    .url("$serverUrl/api/render_file")
+                    .url("$SERVER_URL/api/render_file")
                     .post(bodyBuilder.build())
                     .build()
 
