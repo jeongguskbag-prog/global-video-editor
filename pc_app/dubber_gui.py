@@ -82,6 +82,14 @@ try:
 except Exception:
     FFMPEG_EXE = "ffmpeg"
 
+_WHISPER_CACHE = {}
+
+
+def get_whisper_model(model_size: str) -> WhisperModel:
+    if model_size not in _WHISPER_CACHE:
+        _WHISPER_CACHE[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
+    return _WHISPER_CACHE[model_size]
+
 
 def translate_text(text: str, target_code: str) -> str:
     if not text or len(text.strip()) < 1:
@@ -156,7 +164,7 @@ def run_pipeline(source: str, lang_code: str, voice_name: str,
             )
 
         log(f"음성 인식 중 (Whisper {model_size})...")
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        model = get_whisper_model(model_size)
         segments, _ = model.transcribe(audio_path, beam_size=1, vad_filter=True)
         segment_list = list(segments)
         log(f"인식된 문장 수: {len(segment_list)}")

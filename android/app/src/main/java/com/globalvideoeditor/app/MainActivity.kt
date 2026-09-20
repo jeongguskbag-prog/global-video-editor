@@ -17,6 +17,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.globalvideoeditor.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -40,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedVideoUri: Uri? = null
     private var selectedVideoName: String = "input.mp4"
     private var resultFile: File? = null
+    private var elapsedTimerJob: Job? = null
 
     private val languageCodes = listOf("ko", "en", "zh", "es", "ja", "de", "fr", "vi")
     private val languageLabels = listOf(
@@ -61,7 +64,12 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             selectedVideoUri = uri
             selectedVideoName = queryFileName(uri) ?: "input.mp4"
-            binding.textSelectedFile.text = selectedVideoName
+            val size = queryFileSize(uri)
+            binding.textSelectedFile.text = if (size != null) {
+                "$selectedVideoName (${formatFileSize(size)})"
+            } else {
+                selectedVideoName
+            }
         }
     }
 
@@ -108,6 +116,22 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
+    private fun queryFileSize(uri: Uri): Long? {
+        var size: Long? = null
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (idx >= 0 && cursor.moveToFirst() && !cursor.isNull(idx)) {
+                size = cursor.getLong(idx)
+            }
+        }
+        return size
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        val mb = bytes / (1024.0 * 1024.0)
+        return if (mb >= 1024) String.format("%.1fGB", mb / 1024.0) else String.format("%.1fMB", mb)
+    }
+
     private fun startRender() {
         val serverUrl = binding.editServerUrl.text?.toString()?.trim()?.trimEnd('/') ?: ""
         val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty()
@@ -132,7 +156,8 @@ class MainActivity : AppCompatActivity() {
         val genderCode = genderCodes[binding.spinnerGender.selectedItemPosition]
         val deviceId = androidDeviceId()
 
-        setLoading(true, "서버에 업로드 중... (영상 길이에 따라 수 분 소요될 수 있어요)")
+        setLoading(true, "처리 중...")
+        startElapsedTimer()
 
         lifecycleScope.launch {
             try {
@@ -200,6 +225,24 @@ class MainActivity : AppCompatActivity() {
         binding.progressBar.visibility = if (loading) View.VISIBLE else View.GONE
         binding.btnRender.isEnabled = !loading
         binding.textStatus.text = statusText
+        if (!loading) {
+            elapsedTimerJob?.cancel()
+            elapsedTimerJob = null
+        }
+    }
+
+    private fun startElapsedTimer() {
+        elapsedTimerJob?.cancel()
+        elapsedTimerJob = lifecycleScope.launch {
+            var seconds = 0
+            while (true) {
+                val m = seconds / 60
+                val s = seconds % 60
+                binding.textStatus.text = String.format("처리 중... (경과 %02d:%02d)", m, s)
+                delay(1000)
+                seconds++
+            }
+        }
     }
 
     private fun androidDeviceId(): String {

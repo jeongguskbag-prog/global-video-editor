@@ -35,6 +35,21 @@ def get_whisper_model():
         GLOBAL_WHISPER = WhisperModel("tiny", device="cpu", compute_type="int8", cpu_threads=1, download_root="/tmp/whisper_model")
     return GLOBAL_WHISPER
 
+def probe_duration_seconds(path: str) -> float:
+    try:
+        out = subprocess.run([FFMPEG_EXE, "-i", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for line in out.stderr.splitlines():
+            line = line.strip()
+            if line.startswith("Duration:"):
+                ts = line.split("Duration:")[1].split(",")[0].strip()
+                h, m, s = ts.split(":")
+                return int(h) * 3600 + int(m) * 60 + float(s)
+    except Exception:
+        pass
+    return 5.0
+
+MAX_UPLOAD_BYTES = 300 * 1024 * 1024  # 300MB
+
 RATE_LIMIT_PER_MINUTE = 15
 CLIENT_REQUEST_LOG = defaultdict(list)
 RENDER_SEMAPHORE = asyncio.Semaphore(1)
@@ -124,35 +139,44 @@ async def process_video_file(
 
     try:
         if file and file.filename:
+            total = 0
             with open(input_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_UPLOAD_BYTES:
+                        return JSONResponse(status_code=413, content={"error": "파일이 너무 큽니다 (최대 300MB)."})
+                    buffer.write(chunk)
         else:
             return JSONResponse(status_code=400, content={"error": "동영상 파일을 선택해 주세요."})
 
         async with RENDER_SEMAPHORE:
             audio_path = os.path.join(task_dir, "audio.wav")
-            
+
             # 1. 오디오 추출
             cmd_audio = [
                 FFMPEG_EXE, "-y", "-i", input_path,
                 "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                 audio_path
             ]
-            subprocess.run(cmd_audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.to_thread(subprocess.run, cmd_audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             has_original_audio = os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000
             if not has_original_audio:
+                duration = await asyncio.to_thread(probe_duration_seconds, input_path)
                 cmd_silent = [
                     FFMPEG_EXE, "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
-                    "-t", "5", "-acodec", "pcm_s16le", audio_path
+                    "-t", str(duration), "-acodec", "pcm_s16le", audio_path
                 ]
-                subprocess.run(cmd_silent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                await asyncio.to_thread(subprocess.run, cmd_silent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # 2. 음성 인식 (STT)
             segment_list = []
             try:
-                model = get_whisper_model()
-                segments, _ = model.transcribe(audio_path, beam_size=1, vad_filter=False)
+                model = await asyncio.to_thread(get_whisper_model)
+                segments, _ = await asyncio.to_thread(model.transcribe, audio_path, beam_size=1, vad_filter=False)
                 segment_list = list(segments)
             except Exception as e:
                 print(f"STT 에러 (무시): {e}")
@@ -181,7 +205,7 @@ async def process_video_file(
                     "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy",
                     output_path
                 ]
-                res_sub = subprocess.run(cmd_sub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                res_sub = await asyncio.to_thread(subprocess.run, cmd_sub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 # 실패 시 소프트 자막으로 스트림 결합
                 if res_sub.returncode != 0 or not os.path.exists(output_path):
@@ -190,7 +214,7 @@ async def process_video_file(
                         "-c", "copy", "-c:s", "mov_text",
                         output_path
                     ]
-                    subprocess.run(cmd_soft, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await asyncio.to_thread(subprocess.run, cmd_soft, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # 3-B. 더빙 모드 (Edge-TTS + 안전 믹싱)
             else:
@@ -225,7 +249,7 @@ async def process_video_file(
                         output_path
                     ]
 
-                res_dub = subprocess.run(cmd_dub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                res_dub = await asyncio.to_thread(subprocess.run, cmd_dub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 # 믹싱 실패 시 TTS 오디오로 단순 교체 폴백
                 if res_dub.returncode != 0 or not os.path.exists(output_path):
@@ -235,7 +259,7 @@ async def process_video_file(
                         "-c:v", "copy", "-c:a", "aac",
                         output_path
                     ]
-                    subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await asyncio.to_thread(subprocess.run, cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # 4. 최종 방어 (원본 파일 보존 반환)
             if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
