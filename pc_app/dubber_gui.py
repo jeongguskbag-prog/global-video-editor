@@ -1,7 +1,7 @@
 """
 Global Video Dubber - PC용 독립 실행 프로그램
 
-유튜브 링크(또는 로컬 영상 파일)를 넣으면 음성 인식 -> 번역 -> AI 더빙을 거쳐
+내 PC에 있는 영상 파일을 선택하면 음성 인식 -> 번역 -> AI 더빙을 거쳐
 지정한 언어로 더빙된 영상을 만들어 준다. 서버나 API 키 없이 전부 이 PC에서 처리된다.
 
 실행: python dubber_gui.py
@@ -26,7 +26,6 @@ from tkinter import ttk, filedialog, messagebox
 import edge_tts
 from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
-import yt_dlp
 import imageio_ffmpeg
 
 # ---------------------------------------------------------------------------
@@ -125,39 +124,7 @@ def probe_duration_seconds(path: str) -> float:
     return 10.0
 
 
-def download_video(url: str, output_path: str, log) -> bool:
-    def hook(d):
-        if d.get("status") == "downloading":
-            pct = d.get("_percent_str", "").strip()
-            log(f"다운로드 중... {pct}")
-
-    ydl_opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "outtmpl": output_path,
-        "quiet": True,
-        "no_warnings": True,
-        "overwrites": True,
-        "nocheckcertificate": True,
-        "socket_timeout": 30,
-        "progress_hooks": [hook],
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-            ),
-        },
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 1024
-    except Exception as e:
-        log(f"다운로드 실패: {e}")
-        return False
-
-
-def run_pipeline(source: str, is_url: bool, lang_code: str, voice_name: str,
+def run_pipeline(source: str, lang_code: str, voice_name: str,
                   model_size: str, mode: str, log) -> str:
     os.makedirs(WORK_ROOT, exist_ok=True)
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
@@ -168,12 +135,7 @@ def run_pipeline(source: str, is_url: bool, lang_code: str, voice_name: str,
     input_path = os.path.join(task_dir, "input.mp4")
 
     try:
-        if is_url:
-            log("영상 다운로드 중...")
-            if not download_video(source, input_path, log):
-                raise RuntimeError("영상 다운로드에 실패했습니다. 링크를 확인하세요.")
-        else:
-            shutil.copy(source, input_path)
+        shutil.copy(source, input_path)
 
         log("오디오 추출 중...")
         audio_path = os.path.join(task_dir, "audio.wav")
@@ -291,7 +253,6 @@ class DubberApp:
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.selected_file = tk.StringVar(value="")
-        self.url_var = tk.StringVar(value="")
         self.mode_var = tk.StringVar(value="더빙")
         self.gender_var = tk.StringVar(value="여성")
         self.model_var = tk.StringVar(value="base")
@@ -300,16 +261,13 @@ class DubberApp:
         pad = {"padx": 12, "pady": 6}
 
         ttk.Label(root, text="Global Video Dubber", font=("", 16, "bold")).pack(anchor="w", **pad)
-        ttk.Label(root, text="유튜브 링크나 영상 파일을 35개 언어로 더빙/자막 변환합니다 (전부 로컬 처리)",
+        ttk.Label(root, text="내 PC의 영상 파일을 35개 언어로 더빙/자막 변환합니다 (전부 로컬 처리)",
                   wraplength=520).pack(anchor="w", padx=12)
 
         file_frame = ttk.LabelFrame(root, text="영상 소스")
         file_frame.pack(fill="x", **pad)
         ttk.Button(file_frame, text="영상 파일 선택", command=self.pick_file).pack(side="left", padx=8, pady=8)
         ttk.Label(file_frame, textvariable=self.selected_file, wraplength=380).pack(side="left", padx=4)
-
-        ttk.Label(root, text="또는 유튜브/영상 URL").pack(anchor="w", padx=12)
-        ttk.Entry(root, textvariable=self.url_var, width=70).pack(padx=12, pady=(0, 8))
 
         opt_frame = ttk.LabelFrame(root, text="변환 옵션")
         opt_frame.pack(fill="x", **pad)
@@ -355,7 +313,6 @@ class DubberApp:
         )
         if path:
             self.selected_file.set(path)
-            self.url_var.set("")
 
     def log(self, message: str):
         self.log_queue.put(message)
@@ -374,9 +331,8 @@ class DubberApp:
 
     def start(self):
         file_path = self.selected_file.get().strip()
-        url = self.url_var.get().strip()
-        if not file_path and not url:
-            messagebox.showwarning("입력 필요", "영상 파일을 선택하거나 URL을 입력해 주세요.")
+        if not file_path:
+            messagebox.showwarning("입력 필요", "영상 파일을 선택해 주세요.")
             return
 
         lang_display = self.lang_combo.get()
@@ -396,9 +352,7 @@ class DubberApp:
 
         def worker():
             try:
-                is_url = bool(url) and not file_path
-                source = url if is_url else file_path
-                result_path = run_pipeline(source, is_url, lang_code, voice_name, model_size, mode, self.log)
+                result_path = run_pipeline(file_path, lang_code, voice_name, model_size, mode, self.log)
                 self.log(f"완료! 저장 위치: {result_path}")
                 self.last_output_dir = os.path.dirname(result_path)
                 self.root.after(0, lambda: self.open_btn.configure(state="normal"))

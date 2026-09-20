@@ -62,7 +62,6 @@ class MainActivity : AppCompatActivity() {
             selectedVideoUri = uri
             selectedVideoName = queryFileName(uri) ?: "input.mp4"
             binding.textSelectedFile.text = selectedVideoName
-            binding.editVideoUrl.setText("")
         }
     }
 
@@ -112,7 +111,6 @@ class MainActivity : AppCompatActivity() {
     private fun startRender() {
         val serverUrl = binding.editServerUrl.text?.toString()?.trim()?.trimEnd('/') ?: ""
         val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty()
-        val videoUrl = binding.editVideoUrl.text?.toString()?.trim().orEmpty()
 
         if (serverUrl.isBlank()) {
             toast("서버 주소를 입력해 주세요")
@@ -122,8 +120,8 @@ class MainActivity : AppCompatActivity() {
             toast("라이선스 키를 입력해 주세요")
             return
         }
-        if (selectedVideoUri == null && videoUrl.isBlank()) {
-            toast("영상 파일을 선택하거나 URL을 입력해 주세요")
+        if (selectedVideoUri == null) {
+            toast("영상 파일을 선택해 주세요")
             return
         }
 
@@ -145,15 +143,11 @@ class MainActivity : AppCompatActivity() {
                     .addFormDataPart("license_key", licenseKey)
                     .addFormDataPart("device_id", deviceId)
 
-                val uri = selectedVideoUri
-                if (uri != null) {
-                    bodyBuilder.addFormDataPart(
-                        "file", selectedVideoName,
-                        ContentUriRequestBody(contentResolver, uri, "video/mp4".toMediaTypeOrNull())
-                    )
-                } else {
-                    bodyBuilder.addFormDataPart("video_url", videoUrl)
-                }
+                val uri = selectedVideoUri!!
+                bodyBuilder.addFormDataPart(
+                    "file", selectedVideoName,
+                    ContentUriRequestBody(contentResolver, uri, "video/mp4".toMediaTypeOrNull())
+                )
 
                 val request = Request.Builder()
                     .url("$serverUrl/api/render_file")

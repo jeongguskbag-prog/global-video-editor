@@ -15,7 +15,6 @@ from starlette.background import BackgroundTask
 import edge_tts
 from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
-import yt_dlp
 import imageio_ffmpeg
 
 app = FastAPI(title="AI Global Video Editor Studio")
@@ -88,30 +87,6 @@ def translate_text(text: str, target_code: str) -> str:
     except Exception:
         return text
 
-def download_video_stream(url: str, output_path: str) -> bool:
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': output_path,
-        'quiet': True,
-        'no_warnings': True,
-        'overwrites': True,
-        'nocheckcertificate': True,
-        'socket_timeout': 30,
-        'max_filesize': 250 * 1024 * 1024,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Sec-Fetch-Mode': 'navigate'
-        },
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}}
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 1024
-    except Exception:
-        return False
-
 @app.get("/")
 def root():
     return {"status": "ok", "service": "AI Global Video Editor Running"}
@@ -122,7 +97,6 @@ def root():
 async def process_video_file(
     request: Request,
     file: UploadFile = File(None),
-    video_url: str = Form(None),
     target_lang: str = Form("ko"),
     gender: str = Form("female"),
     mode: str = Form("dynamic_subtitle"),
@@ -152,11 +126,8 @@ async def process_video_file(
         if file and file.filename:
             with open(input_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-        elif video_url and len(video_url.strip()) >= 5:
-            if not download_video_stream(video_url.strip(), input_path):
-                return JSONResponse(status_code=400, content={"error": "영상 다운로드에 실패했습니다. 링크를 확인하세요."})
         else:
-            return JSONResponse(status_code=400, content={"error": "동영상 파일이나 링크를 제공해 주세요."})
+            return JSONResponse(status_code=400, content={"error": "동영상 파일을 선택해 주세요."})
 
         async with RENDER_SEMAPHORE:
             audio_path = os.path.join(task_dir, "audio.wav")

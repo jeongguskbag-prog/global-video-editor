@@ -80,25 +80,6 @@
             android:textSize="12sp"
             android:alpha="0.7" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="또는 영상 URL (유튜브 등)"
-            android:textSize="13sp" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="https://...">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editVideoUrl"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textUri"
-                android:singleLine="true" />
-        </com.google.android.material.textfield.TextInputLayout>
-
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
