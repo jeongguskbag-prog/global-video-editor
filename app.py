@@ -11,6 +11,7 @@ import traceback
 from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 import edge_tts
 from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
@@ -266,13 +267,20 @@ async def process_video_file(
             if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
                 shutil.copy(input_path, output_path)
 
-            return FileResponse(output_path, media_type="video/mp4", filename=f"result_{target_lang}.mp4")
+            def cleanup():
+                shutil.rmtree(task_dir, ignore_errors=True)
+                gc.collect()
+
+            return FileResponse(
+                output_path,
+                media_type="video/mp4",
+                filename=f"result_{target_lang}.mp4",
+                background=BackgroundTask(cleanup)
+            )
 
     except Exception as e:
         err_detail = traceback.format_exc()
         print(f"서버 에러 상세:\n{err_detail}")
-        return JSONResponse(status_code=500, content={"error": f"렌더링 실패: {str(e)}"})
-
-    finally:
         shutil.rmtree(task_dir, ignore_errors=True)
         gc.collect()
+        return JSONResponse(status_code=500, content={"error": f"렌더링 실패: {str(e)}"})
