@@ -113,6 +113,10 @@ UI_STRINGS_KO = {
     "btn_pick_file": "영상 파일 선택",
     "no_file_selected": "선택된 파일 없음",
     "label_or_url": "또는 URL (유튜브·틱톡 등)",
+    "ctx_cut": "잘라내기",
+    "ctx_copy": "복사",
+    "ctx_paste": "붙여넣기",
+    "ctx_select_all": "전체 선택",
     "frame_options": "변환 옵션",
     "label_target_lang": "대상 언어",
     "label_convert_mode": "변환 방식",
@@ -504,7 +508,9 @@ class DubberApp:
         url_row.pack(fill="x", padx=8, pady=(2, 8))
         self.url_label = ttk.Label(url_row)
         self.url_label.pack(side="left")
-        ttk.Entry(url_row, textvariable=self.url_var, width=42).pack(side="left", padx=6)
+        self.url_entry = ttk.Entry(url_row, textvariable=self.url_var, width=42)
+        self.url_entry.pack(side="left", padx=6)
+        self.url_entry.bind("<Button-3>", lambda e: self.show_entry_context_menu(e, self.url_entry))
 
         self.opt_frame = ttk.LabelFrame(self.root)
         self.opt_frame.pack(fill="x", **pad)
@@ -620,6 +626,19 @@ class DubberApp:
         if persist:
             self.prefs["ui_lang"] = lang_code
             save_prefs(self.prefs)
+
+    def show_entry_context_menu(self, event, widget):
+        strings = self.strings
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(label=strings["ctx_cut"], command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label=strings["ctx_copy"], command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label=strings["ctx_paste"], command=lambda: widget.event_generate("<<Paste>>"))
+        menu.add_separator()
+        menu.add_command(label=strings["ctx_select_all"], command=lambda: widget.select_range(0, tk.END))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def pick_file(self):
         path = filedialog.askopenfilename(
