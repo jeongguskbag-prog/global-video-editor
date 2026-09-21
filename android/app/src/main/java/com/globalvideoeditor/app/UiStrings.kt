@@ -68,14 +68,55 @@ object UiStrings {
         "err_tts_request" to "TTS 요청 실패",
         "err_ytdl_init_prefix" to "다운로드 엔진 초기화 실패: ",
         "elapsed_open" to " (경과 ",
+        // 대상(더빙) 언어 스피너 전용 (languageCodes, 8개) -- zh는 대상 언어에서만 쓰는 코드
+        "lang_zh" to "中文",
+        // 프로그램 UI 언어 선택지 (UI_LANGUAGE_CODES, 38개) -- 각 언어의 고유 표기명
         "lang_ko" to "한국어",
         "lang_en" to "English",
-        "lang_zh" to "中文",
-        "lang_es" to "Español",
+        "lang_en-GB" to "English (UK)",
         "lang_ja" to "日本語",
-        "lang_de" to "Deutsch",
+        "lang_zh-CN" to "简体中文",
+        "lang_zh-TW" to "繁體中文",
+        "lang_es" to "Español",
+        "lang_es-MX" to "Español (México)",
         "lang_fr" to "Français",
+        "lang_de" to "Deutsch",
+        "lang_it" to "Italiano",
+        "lang_pt" to "Português (Brasil)",
+        "lang_pt-PT" to "Português (Portugal)",
+        "lang_ru" to "Русский",
+        "lang_ar" to "العربية",
+        "lang_hi" to "हिन्दी",
+        "lang_th" to "ไทย",
         "lang_vi" to "Tiếng Việt",
+        "lang_id" to "Bahasa Indonesia",
+        "lang_ms" to "Bahasa Melayu",
+        "lang_tr" to "Türkçe",
+        "lang_pl" to "Polski",
+        "lang_nl" to "Nederlands",
+        "lang_sv" to "Svenska",
+        "lang_da" to "Dansk",
+        "lang_no" to "Norsk",
+        "lang_fi" to "Suomi",
+        "lang_cs" to "Čeština",
+        "lang_el" to "Ελληνικά",
+        "lang_he" to "עברית",
+        "lang_uk" to "Українська",
+        "lang_ro" to "Română",
+        "lang_hu" to "Magyar",
+        "lang_bg" to "Български",
+        "lang_sk" to "Slovenčina",
+        "lang_ta" to "தமிழ்",
+        "lang_bn" to "বাংলা",
+        "lang_fa" to "فارسی",
+    )
+
+    // 프로그램 언어(UI) 선택지 -- PC 앱의 LANGUAGES 목록과 동일한 38개 코드/순서
+    val UI_LANGUAGE_CODES: List<String> = listOf(
+        "ko", "en", "en-GB", "ja", "zh-CN", "zh-TW", "es", "es-MX", "fr", "de",
+        "it", "pt", "pt-PT", "ru", "ar", "hi", "th", "vi", "id", "ms",
+        "tr", "pl", "nl", "sv", "da", "no", "fi", "cs", "el", "he",
+        "uk", "ro", "hu", "bg", "sk", "ta", "bn", "fa",
     )
 
     val KO: Map<String, String> = FIXED
@@ -103,7 +144,9 @@ object UiStrings {
         log?.invoke(KO.getValue("log_translating"))
         val translated = LinkedHashMap<String, String>()
         for ((key, ko) in KO) {
-            translated[key] = if (key == "lang_ko") ko else LocalDubber.translateText(ko, langCode).ifBlank { ko }
+            // lang_* entries are each language's own native name (e.g. "Español", "日本語")
+            // and are shown as-is in language pickers, never translated into the current UI language.
+            translated[key] = if (key.startsWith("lang_")) ko else LocalDubber.translateText(ko, langCode).ifBlank { ko }
         }
         try {
             val obj = JSONObject()

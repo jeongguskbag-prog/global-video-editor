@@ -81,10 +81,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnPlayResult.setOnClickListener { playResult() }
         binding.btnShareResult.setOnClickListener { shareResult() }
 
-        binding.spinnerUiLang.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageCodes)
+        binding.spinnerUiLang.adapter =
+            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, UiStrings.UI_LANGUAGE_CODES)
         binding.spinnerUiLang.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val code = languageCodes[position]
+                val code = UiStrings.UI_LANGUAGE_CODES[position]
                 if (code != uiLang) applyUiLanguage(code, persist = true)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -141,13 +142,11 @@ class MainActivity : AppCompatActivity() {
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, genderDisplay)
         binding.spinnerGender.setSelection(prevGenderPos)
 
-        // 프로그램 언어 스피너 표시명: 한국어는 항상 "한국어" 그대로, 나머지는 현재 UI 언어로 번역된 이름
-        val uiLangDisplay = languageCodes.map { code ->
-            if (code == "ko") "한국어" else s.getValue("lang_$code")
-        }
+        // 프로그램 언어 스피너: 각 언어를 고유 표기명(자국어 이름)으로 표시, 번역하지 않음
+        val uiLangDisplay = UiStrings.UI_LANGUAGE_CODES.map { code -> s.getValue("lang_$code") }
         binding.spinnerUiLang.adapter =
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, uiLangDisplay)
-        binding.spinnerUiLang.setSelection(languageCodes.indexOf(uiLang).coerceAtLeast(0))
+        binding.spinnerUiLang.setSelection(UiStrings.UI_LANGUAGE_CODES.indexOf(uiLang).coerceAtLeast(0))
     }
 
     private fun queryFileName(uri: Uri): String? {
