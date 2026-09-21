@@ -7,7 +7,6 @@ import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
 import android.view.View
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,8 +37,6 @@ class MainActivity : AppCompatActivity() {
     private val languageLabels = listOf(
         "한국어", "English", "中文", "Español", "日本語", "Deutsch", "Français", "Tiếng Việt"
     )
-    private val modeCodes = listOf("dynamic_subtitle", "subtitle", "dubbing")
-    private val modeLabels = listOf("다이나믹 자막", "일반 자막", "AI 더빙")
     private val genderCodes = listOf("female", "male")
     private val genderLabels = listOf("여성", "남성")
 
@@ -64,18 +61,16 @@ class MainActivity : AppCompatActivity() {
         binding.editLicenseKey.setText(prefs.getString("license_key", ""))
 
         binding.spinnerLanguage.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageLabels)
-        binding.spinnerMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modeLabels)
         binding.spinnerGender.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, genderLabels)
 
-        binding.spinnerMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val isDubbing = modeCodes[position] == "dubbing"
-                binding.spinnerGender.isEnabled = isDubbing
-                binding.labelGender.alpha = if (isDubbing) 1f else 0.4f
-                binding.spinnerGender.alpha = if (isDubbing) 1f else 0.4f
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        val updateGenderEnabled = {
+            val isDubbing = binding.checkDubbing.isChecked
+            binding.spinnerGender.isEnabled = isDubbing
+            binding.labelGender.alpha = if (isDubbing) 1f else 0.4f
+            binding.spinnerGender.alpha = if (isDubbing) 1f else 0.4f
         }
+        binding.checkDubbing.setOnCheckedChangeListener { _, _ -> updateGenderEnabled() }
+        updateGenderEnabled()
 
         binding.btnPickVideo.setOnClickListener {
             pickVideoLauncher.launch(arrayOf("video/*"))
@@ -126,11 +121,16 @@ class MainActivity : AppCompatActivity() {
             toast("영상 파일을 선택해 주세요")
             return
         }
+        val wantSubtitle = binding.checkSubtitle.isChecked
+        val wantDubbing = binding.checkDubbing.isChecked
+        if (!wantSubtitle && !wantDubbing) {
+            toast("자막 또는 더빙 중 최소 하나를 선택해 주세요")
+            return
+        }
 
         prefs.edit().putString("license_key", licenseKey).apply()
 
         val langCode = languageCodes[binding.spinnerLanguage.selectedItemPosition]
-        val modeCode = modeCodes[binding.spinnerMode.selectedItemPosition]
         val genderCode = genderCodes[binding.spinnerGender.selectedItemPosition]
         val deviceId = androidDeviceId()
 
@@ -148,7 +148,8 @@ class MainActivity : AppCompatActivity() {
                     videoName = selectedVideoName,
                     langCode = langCode,
                     genderCode = genderCode,
-                    modeCode = modeCode,
+                    wantSubtitle = wantSubtitle,
+                    wantDubbing = wantDubbing,
                     log = { message -> runOnUiThread { binding.textStatus.text = message } }
                 )
 

@@ -56,9 +56,13 @@ object LocalDubber {
         videoName: String,
         langCode: String,
         genderCode: String,
-        modeCode: String,
+        wantSubtitle: Boolean,
+        wantDubbing: Boolean,
         log: (String) -> Unit
     ): File {
+        if (!wantSubtitle && !wantDubbing) {
+            throw PipelineException("자막 또는 더빙 중 최소 하나를 선택해야 합니다")
+        }
         log("라이선스 확인 중...")
         verifyLicense(serverUrl, licenseKey, deviceId)
 
@@ -92,48 +96,56 @@ object LocalDubber {
             seg.translated = translateText(seg.sourceText, langCode)
         }
 
-        val outputFile = File(workDir, "output.mp4")
+        var videoFile = inputFile
 
-        if (modeCode == "subtitle" || modeCode == "dynamic_subtitle") {
-            log("자막 생성 중...")
-            val srtFile = File(workDir, "subtitles.srt")
-            writeSrt(segments, srtFile)
-            log("자막 인코딩 중...")
-            val ok = runFfmpeg(
-                "-y -i \"${inputFile.absolutePath}\" -vf subtitles='${srtFile.absolutePath.replace("'", "\\'")}' " +
-                    "-c:v libx264 -preset veryfast -c:a copy \"${outputFile.absolutePath}\""
-            )
-            if (!ok || !outputFile.exists()) {
-                runFfmpeg(
-                    "-y -i \"${inputFile.absolutePath}\" -i \"${srtFile.absolutePath}\" " +
-                        "-c copy -c:s mov_text \"${outputFile.absolutePath}\""
-                )
-            }
-        } else {
+        if (wantDubbing) {
             log("AI 음성 합성 중 (온디바이스 TTS)...")
             val fullText = segments.joinToString(" ") { it.translated }.ifBlank { "더빙이 완료되었습니다." }
             val ttsFile = File(workDir, "tts.wav")
             synthesizeSpeech(context, fullText, localeFor(langCode), ttsFile)
 
             log("영상과 더빙 음성 합성 중...")
+            val dubbedFile = File(workDir, "dubbed.mp4")
             val mixOk = if (hasOriginalAudio) {
                 runFfmpeg(
-                    "-y -i \"${inputFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
                         "-filter_complex \"[0:a]volume=0.25[a0];[1:a]volume=1.3[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]\" " +
-                        "-map 0:v:0 -map \"[aout]\" -c:v copy -c:a aac -b:a 192k \"${outputFile.absolutePath}\""
+                        "-map 0:v:0 -map \"[aout]\" -c:v copy -c:a aac -b:a 192k \"${dubbedFile.absolutePath}\""
                 )
             } else {
                 runFfmpeg(
-                    "-y -i \"${inputFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
-                        "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \"${outputFile.absolutePath}\""
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
+                        "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \"${dubbedFile.absolutePath}\""
                 )
             }
-            if (!mixOk || !outputFile.exists()) {
+            if (!mixOk || !dubbedFile.exists()) {
                 runFfmpeg(
-                    "-y -i \"${inputFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
-                        "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \"${outputFile.absolutePath}\""
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
+                        "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \"${dubbedFile.absolutePath}\""
                 )
             }
+            videoFile = dubbedFile
+        }
+
+        var outputFile = File(workDir, "output.mp4")
+
+        if (wantSubtitle) {
+            log("자막 생성 중...")
+            val srtFile = File(workDir, "subtitles.srt")
+            writeSrt(segments, srtFile)
+            log("자막 인코딩 중...")
+            val ok = runFfmpeg(
+                "-y -i \"${videoFile.absolutePath}\" -vf subtitles='${srtFile.absolutePath.replace("'", "\\'")}' " +
+                    "-c:v libx264 -preset veryfast -c:a copy \"${outputFile.absolutePath}\""
+            )
+            if (!ok || !outputFile.exists()) {
+                runFfmpeg(
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${srtFile.absolutePath}\" " +
+                        "-c copy -c:s mov_text \"${outputFile.absolutePath}\""
+                )
+            }
+        } else {
+            outputFile = videoFile
         }
 
         if (!outputFile.exists() || outputFile.length() < 1000) {

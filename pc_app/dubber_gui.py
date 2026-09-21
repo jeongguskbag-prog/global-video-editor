@@ -132,8 +132,11 @@ def probe_duration_seconds(path: str) -> float:
     return 10.0
 
 
-def run_pipeline(source: str, lang_code: str, voice_name: str,
-                  model_size: str, mode: str, log) -> str:
+def run_pipeline(source: str, lang_code: str, voice_name: str, model_size: str,
+                  want_subtitle: bool, want_dubbing: bool, log) -> str:
+    if not want_subtitle and not want_dubbing:
+        raise RuntimeError("자막 또는 더빙 중 최소 하나를 선택해야 합니다.")
+
     os.makedirs(WORK_ROOT, exist_ok=True)
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
@@ -169,32 +172,70 @@ def run_pipeline(source: str, lang_code: str, voice_name: str,
         segment_list = list(segments)
         log(f"인식된 문장 수: {len(segment_list)}")
 
-        output_path = os.path.join(task_dir, "output.mp4")
+        log("번역 중...")
+        translated = []  # (start, end, translated_text)
+        for seg in segment_list:
+            t = seg.text.strip()
+            if not t:
+                continue
+            translated.append((seg.start, seg.end, translate_text(t, lang_code)))
 
-        if mode == "subtitle":
-            log("번역 및 자막 생성 중...")
+        video_path = input_path
+
+        if want_dubbing:
+            full_text = " ".join(t for _, _, t in translated).strip() or "Dubbing complete."
+
+            log("AI 음성 합성 중 (edge-tts)...")
+            temp_mp3 = os.path.join(task_dir, "tts.mp3")
+            asyncio.run(edge_tts.Communicate(full_text, voice_name).save(temp_mp3))
+
+            log("영상과 더빙 음성 합성 중...")
+            dubbed_path = os.path.join(task_dir, "dubbed.mp4")
+            if has_original_audio:
+                cmd = [
+                    FFMPEG_EXE, "-y", "-i", video_path, "-i", temp_mp3,
+                    "-filter_complex",
+                    "[0:a]volume=0.25[a0];[1:a]volume=1.3[a1];"
+                    "[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+                    "-map", "0:v:0", "-map", "[aout]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", dubbed_path,
+                ]
+            else:
+                cmd = [
+                    FFMPEG_EXE, "-y", "-i", video_path, "-i", temp_mp3,
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "copy", "-c:a", "aac", dubbed_path,
+                ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode != 0 or not os.path.exists(dubbed_path):
+                log("믹싱 실패, TTS 음성으로 대체합니다...")
+                cmd_fallback = [
+                    FFMPEG_EXE, "-y", "-i", video_path, "-i", temp_mp3,
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "copy", "-c:a", "aac", dubbed_path,
+                ]
+                subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            video_path = dubbed_path
+
+        if want_subtitle:
+            log("자막 생성 중...")
             srt_path = os.path.join(task_dir, "subtitles.srt")
             with open(srt_path, "w", encoding="utf-8") as f_srt:
-                idx = 1
-                for seg in segment_list:
-                    t = seg.text.strip()
-                    if not t:
-                        continue
-                    trans = translate_text(t, lang_code)
-                    s_h, s_m, s_s = int(seg.start // 3600), int((seg.start % 3600) // 60), seg.start % 60
-                    e_h, e_m, e_s = int(seg.end // 3600), int((seg.end % 3600) // 60), seg.end % 60
+                for idx, (start, end, trans) in enumerate(translated, start=1):
+                    s_h, s_m, s_s = int(start // 3600), int((start % 3600) // 60), start % 60
+                    e_h, e_m, e_s = int(end // 3600), int((end % 3600) // 60), end % 60
                     f_srt.write(
                         f"{idx}\n{s_h:02d}:{s_m:02d}:{s_s:06.3f}".replace(".", ",")
                         + f" --> {e_h:02d}:{e_m:02d}:{e_s:06.3f}".replace(".", ",")
                         + f"\n{trans}\n\n"
                     )
-                    idx += 1
 
             log("자막 인코딩 중...")
             srt_dir = os.path.dirname(srt_path)
             srt_name = os.path.basename(srt_path)
+            output_path = os.path.join(task_dir, "output.mp4")
             res = subprocess.run(
-                [FFMPEG_EXE, "-y", "-i", input_path, "-vf", f"subtitles={srt_name}",
+                [FFMPEG_EXE, "-y", "-i", video_path, "-vf", f"subtitles={srt_name}",
                  "-c:v", "libx264", "-preset", "veryfast", "-c:a", "copy", output_path],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=srt_dir,
@@ -202,47 +243,12 @@ def run_pipeline(source: str, lang_code: str, voice_name: str,
             if res.returncode != 0 or not os.path.exists(output_path):
                 log("자막 굽기 실패, 화면에 안 보이는 소프트 자막으로 대체합니다 (플레이어에서 자막 트랙을 직접 켜야 합니다)...")
                 subprocess.run(
-                    [FFMPEG_EXE, "-y", "-i", input_path, "-i", srt_path,
+                    [FFMPEG_EXE, "-y", "-i", video_path, "-i", srt_path,
                      "-c", "copy", "-c:s", "mov_text", output_path],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
-
-        else:  # dubbing
-            log("번역 중...")
-            spoken_lines = [translate_text(s.text.strip(), lang_code) for s in segment_list if s.text.strip()]
-            full_text = " ".join(spoken_lines).strip()
-            if not full_text:
-                full_text = "Dubbing complete."
-
-            log("AI 음성 합성 중 (edge-tts)...")
-            temp_mp3 = os.path.join(task_dir, "tts.mp3")
-            asyncio.run(edge_tts.Communicate(full_text, voice_name).save(temp_mp3))
-
-            log("영상과 더빙 음성 합성 중...")
-            if has_original_audio:
-                cmd = [
-                    FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
-                    "-filter_complex",
-                    "[0:a]volume=0.25[a0];[1:a]volume=1.3[a1];"
-                    "[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]",
-                    "-map", "0:v:0", "-map", "[aout]",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", output_path,
-                ]
-            else:
-                cmd = [
-                    FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
-                    "-map", "0:v:0", "-map", "1:a:0",
-                    "-c:v", "copy", "-c:a", "aac", output_path,
-                ]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if res.returncode != 0 or not os.path.exists(output_path):
-                log("믹싱 실패, TTS 음성으로 대체합니다...")
-                cmd_fallback = [
-                    FFMPEG_EXE, "-y", "-i", input_path, "-i", temp_mp3,
-                    "-map", "0:v:0", "-map", "1:a:0",
-                    "-c:v", "copy", "-c:a", "aac", output_path,
-                ]
-                subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        else:
+            output_path = video_path
 
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
             raise RuntimeError("결과 영상을 생성하지 못했습니다.")
@@ -265,7 +271,8 @@ class DubberApp:
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.selected_file = tk.StringVar(value="")
-        self.mode_var = tk.StringVar(value="더빙")
+        self.subtitle_var = tk.BooleanVar(value=False)
+        self.dubbing_var = tk.BooleanVar(value=True)
         self.gender_var = tk.StringVar(value="여성")
         self.model_var = tk.StringVar(value="base")
         self.lang_display_to_row = {row[1]: row for row in LANGUAGES}
@@ -293,9 +300,9 @@ class DubberApp:
         self.lang_combo.set("한국어")
         self.lang_combo.pack(side="left", padx=8)
 
-        ttk.Label(row1, text="모드").pack(side="left", padx=(16, 0))
-        ttk.Combobox(row1, textvariable=self.mode_var, values=["더빙", "자막"],
-                     state="readonly", width=8).pack(side="left", padx=8)
+        ttk.Label(row1, text="변환 방식").pack(side="left", padx=(16, 0))
+        ttk.Checkbutton(row1, text="자막", variable=self.subtitle_var).pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(row1, text="더빙", variable=self.dubbing_var).pack(side="left", padx=(4, 0))
 
         row2 = ttk.Frame(opt_frame)
         row2.pack(fill="x", padx=8, pady=6)
@@ -353,7 +360,11 @@ class DubberApp:
             return
         lang_code, _, voice_female, voice_male = self.lang_display_to_row[lang_display]
         voice_name = voice_female if self.gender_var.get() == "여성" else voice_male
-        mode = "dubbing" if self.mode_var.get() == "더빙" else "subtitle"
+        want_subtitle = self.subtitle_var.get()
+        want_dubbing = self.dubbing_var.get()
+        if not want_subtitle and not want_dubbing:
+            messagebox.showwarning("입력 필요", "자막 또는 더빙 중 최소 하나를 선택해 주세요.")
+            return
         model_size = self.model_var.get()
 
         self.start_btn.configure(state="disabled")
@@ -364,7 +375,10 @@ class DubberApp:
 
         def worker():
             try:
-                result_path = run_pipeline(file_path, lang_code, voice_name, model_size, mode, self.log)
+                result_path = run_pipeline(
+                    file_path, lang_code, voice_name, model_size,
+                    want_subtitle, want_dubbing, self.log,
+                )
                 self.log(f"완료! 저장 위치: {result_path}")
                 self.last_output_dir = os.path.dirname(result_path)
                 self.root.after(0, lambda: self.open_btn.configure(state="normal"))

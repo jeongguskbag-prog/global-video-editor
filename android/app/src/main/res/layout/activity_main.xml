@@ -95,12 +95,28 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="모드"
+            android:text="변환 방식 (복수 선택 가능)"
             android:textSize="12sp" />
-        <Spinner
-            android:id="@+id/spinnerMode"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <CheckBox
+                android:id="@+id/checkSubtitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="자막" />
+
+            <CheckBox
+                android:id="@+id/checkDubbing"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:checked="true"
+                android:text="더빙" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/labelGender"
