@@ -28,6 +28,7 @@ import edge_tts
 from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
 import imageio_ffmpeg
+import yt_dlp
 
 # ---------------------------------------------------------------------------
 # 언어 / 보이스 테이블 (번역 코드, 화면 표시명, 여성 보이스, 남성 보이스)
@@ -143,7 +144,47 @@ def probe_duration_seconds(path: str) -> float:
     return 10.0
 
 
-def run_pipeline(source: str, lang_code: str, voice_name: str, model_size: str,
+def download_video_url(url: str, task_dir: str, input_path: str, log):
+    last_pct = {"value": -1}
+
+    def progress_hook(d):
+        if d.get("status") == "downloading":
+            pct_str = d.get("_percent_str", "").strip().replace("%", "")
+            try:
+                pct = int(float(pct_str))
+            except ValueError:
+                return
+            if pct != last_pct["value"] and pct % 10 == 0:
+                last_pct["value"] = pct
+                log(f"영상 다운로드 중... {pct}%")
+        elif d.get("status") == "finished":
+            log("다운로드 완료, 처리 시작...")
+
+    ydl_opts = {
+        "outtmpl": os.path.join(task_dir, "downloaded.%(ext)s"),
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "merge_output_format": "mp4",
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "ffmpeg_location": FFMPEG_EXE,
+        "progress_hooks": [progress_hook],
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        raise RuntimeError(f"영상 다운로드 실패: {e}")
+
+    downloaded = next(
+        (f for f in os.listdir(task_dir) if f.startswith("downloaded.")), None
+    )
+    if not downloaded:
+        raise RuntimeError("다운로드된 영상 파일을 찾을 수 없습니다.")
+    shutil.move(os.path.join(task_dir, downloaded), input_path)
+
+
+def run_pipeline(source: str, is_url: bool, lang_code: str, voice_name: str, model_size: str,
                   want_subtitle: bool, want_dubbing: bool, log) -> str:
     if not want_subtitle and not want_dubbing:
         raise RuntimeError("자막 또는 더빙 중 최소 하나를 선택해야 합니다.")
@@ -157,7 +198,11 @@ def run_pipeline(source: str, lang_code: str, voice_name: str, model_size: str,
     input_path = os.path.join(task_dir, "input.mp4")
 
     try:
-        shutil.copy(source, input_path)
+        if is_url:
+            log("영상 다운로드 중...")
+            download_video_url(source, task_dir, input_path, log)
+        else:
+            shutil.copy(source, input_path)
 
         log("오디오 추출 중...")
         audio_path = os.path.join(task_dir, "audio.wav")
@@ -277,11 +322,12 @@ class DubberApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("Global Video Dubber")
-        root.geometry("560x560")
+        root.geometry("560x600")
         root.resizable(False, False)
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.selected_file = tk.StringVar(value="")
+        self.url_var = tk.StringVar(value="")
         self.subtitle_var = tk.BooleanVar(value=False)
         self.dubbing_var = tk.BooleanVar(value=True)
         self.gender_var = tk.StringVar(value="여성")
@@ -296,8 +342,16 @@ class DubberApp:
 
         file_frame = ttk.LabelFrame(root, text="영상 소스")
         file_frame.pack(fill="x", **pad)
-        ttk.Button(file_frame, text="영상 파일 선택", command=self.pick_file).pack(side="left", padx=8, pady=8)
-        ttk.Label(file_frame, textvariable=self.selected_file, wraplength=380).pack(side="left", padx=4)
+
+        file_row = ttk.Frame(file_frame)
+        file_row.pack(fill="x", padx=8, pady=(8, 2))
+        ttk.Button(file_row, text="영상 파일 선택", command=self.pick_file).pack(side="left")
+        ttk.Label(file_row, textvariable=self.selected_file, wraplength=380).pack(side="left", padx=4)
+
+        url_row = ttk.Frame(file_frame)
+        url_row.pack(fill="x", padx=8, pady=(2, 8))
+        ttk.Label(url_row, text="또는 URL (유튜브·틱톡 등)").pack(side="left")
+        ttk.Entry(url_row, textvariable=self.url_var, width=42).pack(side="left", padx=6)
 
         opt_frame = ttk.LabelFrame(root, text="변환 옵션")
         opt_frame.pack(fill="x", **pad)
@@ -343,6 +397,7 @@ class DubberApp:
         )
         if path:
             self.selected_file.set(path)
+            self.url_var.set("")
 
     def log(self, message: str):
         self.log_queue.put(message)
@@ -360,9 +415,16 @@ class DubberApp:
         self.root.after(200, self.poll_log)
 
     def start(self):
+        url = self.url_var.get().strip()
         file_path = self.selected_file.get().strip()
-        if not file_path:
-            messagebox.showwarning("입력 필요", "영상 파일을 선택해 주세요.")
+        if url:
+            source = url
+            is_url = True
+        elif file_path:
+            source = file_path
+            is_url = False
+        else:
+            messagebox.showwarning("입력 필요", "영상 파일을 선택하거나 URL을 입력해 주세요.")
             return
 
         lang_display = self.lang_combo.get()
@@ -387,7 +449,7 @@ class DubberApp:
         def worker():
             try:
                 result_path = run_pipeline(
-                    file_path, lang_code, voice_name, model_size,
+                    source, is_url, lang_code, voice_name, model_size,
                     want_subtitle, want_dubbing, self.log,
                 )
                 self.log(f"완료! 저장 위치: {result_path}")

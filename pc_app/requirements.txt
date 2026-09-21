@@ -2,3 +2,4 @@ edge-tts
 deep-translator
 faster-whisper
 imageio-ffmpeg
+yt-dlp

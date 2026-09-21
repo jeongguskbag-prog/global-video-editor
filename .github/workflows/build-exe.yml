@@ -35,6 +35,7 @@ jobs:
           pyinstaller --onefile --windowed --name GlobalVideoDubber
           --collect-all ctranslate2
           --collect-data faster_whisper
+          --collect-submodules yt_dlp
           dubber_gui.py
 
       - name: Upload EXE artifact
