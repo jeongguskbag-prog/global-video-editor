@@ -94,7 +94,7 @@ object LocalDubber {
 
         val outputFile = File(workDir, "output.mp4")
 
-        if (modeCode == "subtitle") {
+        if (modeCode == "subtitle" || modeCode == "dynamic_subtitle") {
             log("자막 생성 중...")
             val srtFile = File(workDir, "subtitles.srt")
             writeSrt(segments, srtFile)
