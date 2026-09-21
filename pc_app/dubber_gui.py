@@ -113,6 +113,14 @@ def translate_text(text: str, target_code: str) -> str:
         return text
 
 
+def ffmpeg_filter_path(path: str) -> str:
+    """Escape a filesystem path for use inside an ffmpeg filtergraph argument.
+    On Windows, drive-letter colons (C:\\...) and backslashes otherwise break
+    the subtitles= filter's own option-parsing syntax."""
+    escaped = os.path.abspath(path).replace("\\", "/").replace(":", "\\:")
+    return escaped
+
+
 def probe_duration_seconds(path: str) -> float:
     try:
         out = subprocess.run(
@@ -192,11 +200,12 @@ def run_pipeline(source: str, lang_code: str, voice_name: str,
 
             log("자막 인코딩 중...")
             res = subprocess.run(
-                [FFMPEG_EXE, "-y", "-i", input_path, "-vf", f"subtitles={srt_path}",
+                [FFMPEG_EXE, "-y", "-i", input_path, "-vf", f"subtitles={ffmpeg_filter_path(srt_path)}",
                  "-c:v", "libx264", "-preset", "veryfast", "-c:a", "copy", output_path],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             if res.returncode != 0 or not os.path.exists(output_path):
+                log("자막 굽기 실패, 화면에 안 보이는 소프트 자막으로 대체합니다 (플레이어에서 자막 트랙을 직접 켜야 합니다)...")
                 subprocess.run(
                     [FFMPEG_EXE, "-y", "-i", input_path, "-i", srt_path,
                      "-c", "copy", "-c:s", "mov_text", output_path],
