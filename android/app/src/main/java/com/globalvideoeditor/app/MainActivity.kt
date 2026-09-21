@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 selectedVideoName
             }
+            binding.editVideoUrl.setText("")
         }
     }
 
@@ -116,9 +117,10 @@ class MainActivity : AppCompatActivity() {
             toast("라이선스 키를 입력해 주세요")
             return
         }
+        val urlText = binding.editVideoUrl.text?.toString()?.trim().orEmpty()
         val uri = selectedVideoUri
-        if (uri == null) {
-            toast("영상 파일을 선택해 주세요")
+        if (urlText.isBlank() && uri == null) {
+            toast("영상 파일을 선택하거나 URL을 입력해 주세요")
             return
         }
         val wantSubtitle = binding.checkSubtitle.isChecked
@@ -144,7 +146,8 @@ class MainActivity : AppCompatActivity() {
                     serverUrl = SERVER_URL,
                     licenseKey = licenseKey,
                     deviceId = deviceId,
-                    videoUri = uri,
+                    videoUri = if (urlText.isBlank()) uri else null,
+                    videoUrl = urlText.ifBlank { null },
                     videoName = selectedVideoName,
                     langCode = langCode,
                     genderCode = genderCode,

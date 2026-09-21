@@ -68,6 +68,18 @@
             android:textSize="12sp"
             android:alpha="0.7" />
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="또는 URL (유튜브·틱톡 등)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editVideoUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"

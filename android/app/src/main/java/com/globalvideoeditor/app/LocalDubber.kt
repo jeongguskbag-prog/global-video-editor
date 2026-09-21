@@ -6,6 +6,9 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLException
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import dev.ffmpegkit.whisper.Whisper
 import dev.ffmpegkit.whisper.WhisperConfig
 import kotlinx.coroutines.Dispatchers
@@ -47,12 +50,16 @@ object LocalDubber {
 
     class PipelineException(message: String) : Exception(message)
 
+    @Volatile
+    private var youtubeDlInitialized = false
+
     suspend fun verifyLicenseAndRun(
         context: Context,
         serverUrl: String,
         licenseKey: String,
         deviceId: String,
-        videoUri: Uri,
+        videoUri: Uri?,
+        videoUrl: String?,
         videoName: String,
         langCode: String,
         genderCode: String,
@@ -63,13 +70,21 @@ object LocalDubber {
         if (!wantSubtitle && !wantDubbing) {
             throw PipelineException("자막 또는 더빙 중 최소 하나를 선택해야 합니다")
         }
+        if (videoUri == null && videoUrl.isNullOrBlank()) {
+            throw PipelineException("영상 파일을 선택하거나 URL을 입력해야 합니다")
+        }
         log("라이선스 확인 중...")
         verifyLicense(serverUrl, licenseKey, deviceId)
 
-        log("영상 불러오는 중...")
         val workDir = File(context.cacheDir, "gve_work").apply { mkdirs() }
         val inputFile = File(workDir, "input_${System.currentTimeMillis()}.mp4")
-        copyUriToFile(context, videoUri, inputFile)
+        if (!videoUrl.isNullOrBlank()) {
+            log("영상 다운로드 중...")
+            downloadVideoUrl(context, videoUrl.trim(), workDir, inputFile, log)
+        } else {
+            log("영상 불러오는 중...")
+            copyUriToFile(context, videoUri!!, inputFile)
+        }
 
         val modelFile = ensureModel(context, log)
 
@@ -226,6 +241,52 @@ object LocalDubber {
         context.contentResolver.openInputStream(uri)?.use { input ->
             destFile.outputStream().use { output -> input.copyTo(output) }
         } ?: throw PipelineException("영상 파일을 열 수 없습니다")
+    }
+
+    private suspend fun downloadVideoUrl(
+        context: Context,
+        url: String,
+        workDir: File,
+        inputFile: File,
+        log: (String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        if (!youtubeDlInitialized) {
+            synchronized(this@LocalDubber) {
+                if (!youtubeDlInitialized) {
+                    try {
+                        YoutubeDL.getInstance().init(context)
+                        youtubeDlInitialized = true
+                    } catch (e: YoutubeDLException) {
+                        throw PipelineException("다운로드 엔진 초기화 실패: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        val request = YoutubeDLRequest(url)
+        // A single pre-merged stream avoids needing the library's separate ffmpeg
+        // module (already bundled via ffmpeg-kit for the rest of the pipeline).
+        request.addOption("-f", "best[ext=mp4]/best")
+        request.addOption("-o", File(workDir, "downloaded.%(ext)s").absolutePath)
+
+        var lastPct = -1
+        try {
+            YoutubeDL.getInstance().execute(request, null) { progress, _, _ ->
+                val pct = progress.toInt()
+                if (pct != lastPct && pct % 10 == 0) {
+                    lastPct = pct
+                    log("영상 다운로드 중... $pct%")
+                }
+            }
+        } catch (e: Exception) {
+            throw PipelineException("영상 다운로드 실패: ${e.message}")
+        }
+
+        val downloaded = workDir.listFiles()?.firstOrNull { it.name.startsWith("downloaded.") }
+            ?: throw PipelineException("다운로드된 영상 파일을 찾을 수 없습니다")
+        downloaded.copyTo(inputFile, overwrite = true)
+        downloaded.delete()
+        log("다운로드 완료, 처리 시작...")
     }
 
     private suspend fun runFfmpeg(command: String): Boolean = withContext(Dispatchers.IO) {

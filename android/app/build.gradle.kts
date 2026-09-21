@@ -53,4 +53,5 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.8")
     implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
 }
