@@ -20,6 +20,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -36,7 +37,13 @@ object LocalDubber {
 
     data class Segment(val startMs: Long, val endMs: Long, val sourceText: String, var translated: String = "")
 
-    private val httpClient = OkHttpClient()
+    // Render's free tier spins down after inactivity and can take 30-60s to wake up,
+    // so the license check needs a generous connect/read timeout, not OkHttp's 10s default.
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
 
     class PipelineException(message: String) : Exception(message)
 
