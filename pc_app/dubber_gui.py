@@ -14,6 +14,7 @@ import json
 import queue
 import shutil
 import asyncio
+import tempfile
 import subprocess
 import threading
 import urllib.request
@@ -74,8 +75,18 @@ LANGUAGES = [
 
 WHISPER_MODELS = ["tiny", "base", "small"]
 
-WORK_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_work")
-OUTPUT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+# When frozen by PyInstaller (--onefile), __file__ resolves inside the
+# temp extraction folder (%TEMP%\_MEIxxxxx on Windows), which gets wiped
+# the moment the exe process exits -- anything saved there disappears when
+# the program closes. sys.executable points at the actual, persistent exe
+# file instead, so results survive after the app quits.
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+WORK_ROOT = os.path.join(tempfile.gettempdir(), "GlobalVideoDubber_work")
+OUTPUT_ROOT = os.path.join(BASE_DIR, "output")
 
 try:
     FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
