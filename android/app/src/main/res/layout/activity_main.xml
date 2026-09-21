@@ -20,18 +20,29 @@
             android:layout_marginBottom="4dp" />
 
         <TextView
+            android:id="@+id/textAppSubtitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="AI 자막 / 더빙 자동 변환"
             android:textSize="13sp"
             android:alpha="0.6"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="12dp" />
 
-        <com.google.android.material.textfield.TextInputLayout
+        <TextView
+            android:id="@+id/labelUiLang"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+        <Spinner
+            android:id="@+id/spinnerUiLang"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:hint="라이선스 키">
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/layoutLicenseKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/editLicenseKey"
                 android:layout_width="match_parent"
@@ -46,9 +57,9 @@
             android:layout_marginVertical="16dp" />
 
         <TextView
+            android:id="@+id/labelSource"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="영상 소스"
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
@@ -56,23 +67,21 @@
             android:id="@+id/btnPickVideo"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="갤러리에서 영상 선택" />
+            android:layout_height="wrap_content" />
 
         <TextView
             android:id="@+id/textSelectedFile"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="선택된 파일 없음"
             android:textSize="12sp"
             android:alpha="0.7" />
 
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/layoutVideoUrl"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:hint="또는 URL (유튜브·틱톡 등)">
+            android:layout_marginTop="12dp">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/editVideoUrl"
                 android:layout_width="match_parent"
@@ -87,16 +96,16 @@
             android:layout_marginVertical="16dp" />
 
         <TextView
+            android:id="@+id/labelOptions"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="변환 옵션"
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
         <TextView
+            android:id="@+id/labelTargetLang"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="대상 언어"
             android:textSize="12sp" />
         <Spinner
             android:id="@+id/spinnerLanguage"
@@ -104,10 +113,10 @@
             android:layout_height="wrap_content" />
 
         <TextView
+            android:id="@+id/labelConvertMode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="변환 방식 (복수 선택 가능)"
             android:textSize="12sp" />
         <LinearLayout
             android:layout_width="match_parent"
@@ -118,16 +127,14 @@
                 android:id="@+id/checkSubtitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="자막" />
+                android:layout_weight="1" />
 
             <CheckBox
                 android:id="@+id/checkDubbing"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:checked="true"
-                android:text="더빙" />
+                android:checked="true" />
         </LinearLayout>
 
         <TextView
@@ -135,7 +142,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="음성 성별 (더빙 모드)"
             android:textSize="12sp" />
         <Spinner
             android:id="@+id/spinnerGender"
@@ -146,8 +152,7 @@
             android:id="@+id/btnRender"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="렌더링 시작" />
+            android:layout_marginTop="20dp" />
 
         <ProgressBar
             android:id="@+id/progressBar"
@@ -178,8 +183,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginEnd="6dp"
-                android:text="재생" />
+                android:layout_marginEnd="6dp" />
 
             <Button
                 android:id="@+id/btnShareResult"
@@ -187,8 +191,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginStart="6dp"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:text="공유" />
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton" />
         </LinearLayout>
 
     </LinearLayout>

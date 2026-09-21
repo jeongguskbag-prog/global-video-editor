@@ -65,30 +65,31 @@ object LocalDubber {
         genderCode: String,
         wantSubtitle: Boolean,
         wantDubbing: Boolean,
+        strings: Map<String, String>,
         log: (String) -> Unit
     ): File {
         if (!wantSubtitle && !wantDubbing) {
-            throw PipelineException("자막 또는 더빙 중 최소 하나를 선택해야 합니다")
+            throw PipelineException(strings.getValue("err_pipeline_mode"))
         }
         if (videoUri == null && videoUrl.isNullOrBlank()) {
-            throw PipelineException("영상 파일을 선택하거나 URL을 입력해야 합니다")
+            throw PipelineException(strings.getValue("err_pipeline_source"))
         }
-        log("라이선스 확인 중...")
+        log(strings.getValue("log_license_check"))
         verifyLicense(serverUrl, licenseKey, deviceId)
 
         val workDir = File(context.cacheDir, "gve_work").apply { mkdirs() }
         val inputFile = File(workDir, "input_${System.currentTimeMillis()}.mp4")
         if (!videoUrl.isNullOrBlank()) {
-            log("영상 다운로드 중...")
-            downloadVideoUrl(context, videoUrl.trim(), workDir, inputFile, log)
+            log(strings.getValue("log_downloading"))
+            downloadVideoUrl(context, videoUrl.trim(), workDir, inputFile, strings, log)
         } else {
-            log("영상 불러오는 중...")
-            copyUriToFile(context, videoUri!!, inputFile)
+            log(strings.getValue("log_loading_video"))
+            copyUriToFile(context, videoUri!!, inputFile, strings)
         }
 
-        val modelFile = ensureModel(context, log)
+        val modelFile = ensureModel(context, strings, log)
 
-        log("오디오 추출 중...")
+        log(strings.getValue("log_extract_audio"))
         val audioFile = File(workDir, "audio.wav")
         runFfmpeg(
             "-y -i \"${inputFile.absolutePath}\" -vn -acodec pcm_s16le -ar 16000 -ac 1 \"${audioFile.absolutePath}\""
@@ -102,11 +103,11 @@ object LocalDubber {
             )
         }
 
-        log("음성 인식 중 (온디바이스 Whisper)...")
+        log(strings.getValue("log_whisper"))
         val segments = transcribe(context, modelFile, audioFile)
-        log("인식된 문장 수: ${segments.size}")
+        log(strings.getValue("log_segments_prefix") + segments.size)
 
-        log("번역 중...")
+        log(strings.getValue("log_translating"))
         for (seg in segments) {
             seg.translated = translateText(seg.sourceText, langCode)
         }
@@ -114,12 +115,12 @@ object LocalDubber {
         var videoFile = inputFile
 
         if (wantDubbing) {
-            log("AI 음성 합성 중 (온디바이스 TTS)...")
+            log(strings.getValue("log_tts"))
             val fullText = segments.joinToString(" ") { it.translated }.ifBlank { "더빙이 완료되었습니다." }
             val ttsFile = File(workDir, "tts.wav")
-            synthesizeSpeech(context, fullText, localeFor(langCode), ttsFile)
+            synthesizeSpeech(context, fullText, localeFor(langCode), ttsFile, strings)
 
-            log("영상과 더빙 음성 합성 중...")
+            log(strings.getValue("log_mixing"))
             val dubbedFile = File(workDir, "dubbed.mp4")
             val mixOk = if (hasOriginalAudio) {
                 runFfmpeg(
@@ -145,10 +146,10 @@ object LocalDubber {
         var outputFile = File(workDir, "output.mp4")
 
         if (wantSubtitle) {
-            log("자막 생성 중...")
+            log(strings.getValue("log_subtitle_gen"))
             val srtFile = File(workDir, "subtitles.srt")
             writeSrt(segments, srtFile)
-            log("자막 인코딩 중...")
+            log(strings.getValue("log_subtitle_encode"))
             val ok = runFfmpeg(
                 "-y -i \"${videoFile.absolutePath}\" -vf subtitles='${srtFile.absolutePath.replace("'", "\\'")}' " +
                     "-c:v libx264 -preset veryfast -c:a copy \"${outputFile.absolutePath}\""
@@ -197,18 +198,18 @@ object LocalDubber {
         }
     }
 
-    private suspend fun ensureModel(context: Context, log: (String) -> Unit): File {
+    private suspend fun ensureModel(context: Context, strings: Map<String, String>, log: (String) -> Unit): File {
         val modelDir = File(context.getExternalFilesDir(null), "models").apply { mkdirs() }
         val modelFile = File(modelDir, MODEL_FILENAME)
         if (modelFile.exists() && modelFile.length() > 50_000_000) return modelFile
 
-        log("음성 인식 모델 다운로드 중 (최초 1회, 약 140MB)...")
+        log(strings.getValue("log_model_download"))
         withContext(Dispatchers.IO) {
             val tempFile = File(modelDir, "$MODEL_FILENAME.part")
             val connection = URL(MODEL_URL).openConnection() as HttpURLConnection
             connection.connect()
             if (connection.responseCode !in 200..299) {
-                throw PipelineException("모델 다운로드 실패 (HTTP ${connection.responseCode})")
+                throw PipelineException("${strings.getValue("err_model_download_fail_prefix")}${connection.responseCode})")
             }
             val total = connection.contentLengthLong
             var downloaded = 0L
@@ -225,7 +226,7 @@ object LocalDubber {
                             val pct = ((downloaded * 100) / total).toInt()
                             if (pct != lastReportedPct && pct % 10 == 0) {
                                 lastReportedPct = pct
-                                log("모델 다운로드 중... $pct%")
+                                log("${strings.getValue("log_model_download_pct_prefix")}$pct%")
                             }
                         }
                     }
@@ -237,10 +238,10 @@ object LocalDubber {
         return modelFile
     }
 
-    private fun copyUriToFile(context: Context, uri: Uri, destFile: File) {
+    private fun copyUriToFile(context: Context, uri: Uri, destFile: File, strings: Map<String, String>) {
         context.contentResolver.openInputStream(uri)?.use { input ->
             destFile.outputStream().use { output -> input.copyTo(output) }
-        } ?: throw PipelineException("영상 파일을 열 수 없습니다")
+        } ?: throw PipelineException(strings.getValue("err_open_video"))
     }
 
     private suspend fun downloadVideoUrl(
@@ -248,6 +249,7 @@ object LocalDubber {
         url: String,
         workDir: File,
         inputFile: File,
+        strings: Map<String, String>,
         log: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
         if (!youtubeDlInitialized) {
@@ -257,7 +259,7 @@ object LocalDubber {
                         YoutubeDL.getInstance().init(context)
                         youtubeDlInitialized = true
                     } catch (e: YoutubeDLException) {
-                        throw PipelineException("다운로드 엔진 초기화 실패: ${e.message}")
+                        throw PipelineException("${strings.getValue("err_ytdl_init_prefix")}${e.message}")
                     }
                 }
             }
@@ -275,18 +277,18 @@ object LocalDubber {
                 val pct = progress.toInt()
                 if (pct != lastPct && pct % 10 == 0) {
                     lastPct = pct
-                    log("영상 다운로드 중... $pct%")
+                    log("${strings.getValue("log_downloading")} $pct%")
                 }
             }
         } catch (e: Exception) {
-            throw PipelineException("영상 다운로드 실패: ${e.message}")
+            throw PipelineException("${strings.getValue("err_download_fail_prefix")}${e.message}")
         }
 
         val downloaded = workDir.listFiles()?.firstOrNull { it.name.startsWith("downloaded.") }
-            ?: throw PipelineException("다운로드된 영상 파일을 찾을 수 없습니다")
+            ?: throw PipelineException(strings.getValue("err_no_downloaded_file"))
         downloaded.copyTo(inputFile, overwrite = true)
         downloaded.delete()
-        log("다운로드 완료, 처리 시작...")
+        log(strings.getValue("log_download_done"))
     }
 
     private suspend fun runFfmpeg(command: String): Boolean = withContext(Dispatchers.IO) {
@@ -326,7 +328,7 @@ object LocalDubber {
         }
     }
 
-    private suspend fun translateText(text: String, targetCode: String): String {
+    internal suspend fun translateText(text: String, targetCode: String): String {
         if (text.isBlank()) return ""
         return withContext(Dispatchers.IO) {
             try {
@@ -381,12 +383,18 @@ object LocalDubber {
         else -> Locale.US
     }
 
-    private suspend fun synthesizeSpeech(context: Context, text: String, locale: Locale, outFile: File) {
-        val tts = createTts(context)
+    private suspend fun synthesizeSpeech(
+        context: Context,
+        text: String,
+        locale: Locale,
+        outFile: File,
+        strings: Map<String, String>
+    ) {
+        val tts = createTts(context, strings)
         try {
             val result = tts.setLanguage(locale)
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                throw PipelineException("이 언어의 음성 데이터가 폰에 설치되어 있지 않습니다 (설정 > 일반 > 언어 및 입력 > 텍스트 음성 변환에서 설치 필요)")
+                throw PipelineException(strings.getValue("err_tts_lang"))
             }
             val utteranceId = UUID.randomUUID().toString()
             suspendCancellableCoroutine<Unit> { cont ->
@@ -397,16 +405,16 @@ object LocalDubber {
                     }
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
-                        if (cont.isActive) cont.resumeWithException(PipelineException("TTS 합성 실패"))
+                        if (cont.isActive) cont.resumeWithException(PipelineException(strings.getValue("err_tts_synth")))
                     }
                     override fun onError(utteranceId: String?, errorCode: Int) {
-                        if (cont.isActive) cont.resumeWithException(PipelineException("TTS 합성 실패 (code $errorCode)"))
+                        if (cont.isActive) cont.resumeWithException(PipelineException("${strings.getValue("err_tts_synth")} (code $errorCode)"))
                     }
                 })
                 val params = android.os.Bundle()
                 val res = tts.synthesizeToFile(text, params, outFile, utteranceId)
                 if (res != TextToSpeech.SUCCESS && cont.isActive) {
-                    cont.resumeWithException(PipelineException("TTS 요청 실패"))
+                    cont.resumeWithException(PipelineException(strings.getValue("err_tts_request")))
                 }
             }
         } finally {
@@ -415,14 +423,15 @@ object LocalDubber {
         }
     }
 
-    private suspend fun createTts(context: Context): TextToSpeech = suspendCancellableCoroutine { cont ->
-        var ttsRef: TextToSpeech? = null
-        ttsRef = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                cont.resume(ttsRef!!)
-            } else {
-                cont.resumeWithException(PipelineException("TTS 엔진 초기화 실패"))
+    private suspend fun createTts(context: Context, strings: Map<String, String>): TextToSpeech =
+        suspendCancellableCoroutine { cont ->
+            var ttsRef: TextToSpeech? = null
+            ttsRef = TextToSpeech(context) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    cont.resume(ttsRef!!)
+                } else {
+                    cont.resumeWithException(PipelineException(strings.getValue("err_tts_init")))
+                }
             }
         }
-    }
 }

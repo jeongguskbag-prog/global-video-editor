@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,12 +34,11 @@ class MainActivity : AppCompatActivity() {
     private var resultFile: File? = null
     private var elapsedTimerJob: Job? = null
 
+    private var strings: Map<String, String> = UiStrings.KO
+    private var uiLang: String = "ko"
+
     private val languageCodes = listOf("ko", "en", "zh", "es", "ja", "de", "fr", "vi")
-    private val languageLabels = listOf(
-        "한국어", "English", "中文", "Español", "日本語", "Deutsch", "Français", "Tiếng Việt"
-    )
     private val genderCodes = listOf("female", "male")
-    private val genderLabels = listOf("여성", "남성")
 
     private val pickVideoLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -61,8 +61,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.editLicenseKey.setText(prefs.getString("license_key", ""))
 
-        binding.spinnerLanguage.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageLabels)
-        binding.spinnerGender.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, genderLabels)
+        binding.spinnerGender.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("", ""))
 
         val updateGenderEnabled = {
             val isDubbing = binding.checkDubbing.isChecked
@@ -81,6 +80,74 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnPlayResult.setOnClickListener { playResult() }
         binding.btnShareResult.setOnClickListener { shareResult() }
+
+        binding.spinnerUiLang.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languageCodes)
+        binding.spinnerUiLang.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val code = languageCodes[position]
+                if (code != uiLang) applyUiLanguage(code, persist = true)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        val savedUiLang = prefs.getString("ui_lang", "ko") ?: "ko"
+        applyUiLanguage(savedUiLang, persist = false)
+    }
+
+    private fun applyUiLanguage(langCode: String, persist: Boolean) {
+        lifecycleScope.launch {
+            val loaded = UiStrings.get(applicationContext, langCode) { msg ->
+                runOnUiThread { binding.textStatus.text = msg }
+            }
+            strings = loaded
+            uiLang = langCode
+            applyStrings()
+            if (persist) {
+                prefs.edit().putString("ui_lang", langCode).apply()
+            }
+        }
+    }
+
+    private fun applyStrings() {
+        val s = strings
+        binding.textAppSubtitle.text = s.getValue("app_subtitle")
+        binding.labelUiLang.text = s.getValue("label_ui_lang")
+        binding.layoutLicenseKey.hint = s.getValue("label_license")
+        binding.labelSource.text = s.getValue("label_source")
+        binding.btnPickVideo.text = s.getValue("btn_pick_video")
+        if (selectedVideoUri == null) {
+            binding.textSelectedFile.text = s.getValue("no_file_selected")
+        }
+        binding.layoutVideoUrl.hint = s.getValue("label_or_url")
+        binding.labelOptions.text = s.getValue("label_options")
+        binding.labelTargetLang.text = s.getValue("label_target_lang")
+        binding.labelConvertMode.text = s.getValue("label_convert_mode")
+        binding.checkSubtitle.text = s.getValue("check_subtitle")
+        binding.checkDubbing.text = s.getValue("check_dubbing")
+        binding.labelGender.text = s.getValue("label_gender")
+        binding.btnRender.text = s.getValue("btn_render")
+        binding.btnPlayResult.text = s.getValue("btn_play")
+        binding.btnShareResult.text = s.getValue("btn_share")
+
+        val targetLangDisplay = languageCodes.map { s.getValue("lang_$it") }
+        val prevTargetPos = binding.spinnerLanguage.selectedItemPosition.let { if (it < 0) 0 else it }
+        binding.spinnerLanguage.adapter =
+            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, targetLangDisplay)
+        binding.spinnerLanguage.setSelection(prevTargetPos)
+
+        val genderDisplay = listOf(s.getValue("gender_female"), s.getValue("gender_male"))
+        val prevGenderPos = binding.spinnerGender.selectedItemPosition.let { if (it < 0) 0 else it }
+        binding.spinnerGender.adapter =
+            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, genderDisplay)
+        binding.spinnerGender.setSelection(prevGenderPos)
+
+        // 프로그램 언어 스피너 표시명: 한국어는 항상 "한국어" 그대로, 나머지는 현재 UI 언어로 번역된 이름
+        val uiLangDisplay = languageCodes.map { code ->
+            if (code == "ko") "한국어" else s.getValue("lang_$code")
+        }
+        binding.spinnerUiLang.adapter =
+            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, uiLangDisplay)
+        binding.spinnerUiLang.setSelection(languageCodes.indexOf(uiLang).coerceAtLeast(0))
     }
 
     private fun queryFileName(uri: Uri): String? {
@@ -111,22 +178,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRender() {
+        val s = strings
         val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty()
 
         if (licenseKey.isBlank()) {
-            toast("라이선스 키를 입력해 주세요")
+            toast(s.getValue("toast_need_license"))
             return
         }
         val urlText = binding.editVideoUrl.text?.toString()?.trim().orEmpty()
         val uri = selectedVideoUri
         if (urlText.isBlank() && uri == null) {
-            toast("영상 파일을 선택하거나 URL을 입력해 주세요")
+            toast(s.getValue("toast_need_source"))
             return
         }
         val wantSubtitle = binding.checkSubtitle.isChecked
         val wantDubbing = binding.checkDubbing.isChecked
         if (!wantSubtitle && !wantDubbing) {
-            toast("자막 또는 더빙 중 최소 하나를 선택해 주세요")
+            toast(s.getValue("toast_need_mode"))
             return
         }
 
@@ -136,7 +204,7 @@ class MainActivity : AppCompatActivity() {
         val genderCode = genderCodes[binding.spinnerGender.selectedItemPosition]
         val deviceId = androidDeviceId()
 
-        setLoading(true, "처리 중...")
+        setLoading(true, s.getValue("status_processing"))
         startElapsedTimer()
 
         lifecycleScope.launch {
@@ -153,18 +221,19 @@ class MainActivity : AppCompatActivity() {
                     genderCode = genderCode,
                     wantSubtitle = wantSubtitle,
                     wantDubbing = wantDubbing,
+                    strings = s,
                     log = { message -> runOnUiThread { binding.textStatus.text = message } }
                 )
 
                 resultFile = outFile
-                setLoading(false, "완료! 저장 위치: ${outFile.absolutePath}")
+                setLoading(false, s.getValue("status_done_prefix") + outFile.absolutePath)
                 binding.layoutResultActions.visibility = View.VISIBLE
 
             } catch (e: LocalDubber.PipelineException) {
-                setLoading(false, "오류: ${e.message}")
+                setLoading(false, s.getValue("status_error_prefix") + e.message)
             } catch (e: Exception) {
                 Log.e("GVE", "pipeline error", e)
-                setLoading(false, "알 수 없는 오류: ${e.message}")
+                setLoading(false, s.getValue("status_unknown_error_prefix") + e.message)
             }
         }
     }
@@ -181,6 +250,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startElapsedTimer() {
         elapsedTimerJob?.cancel()
+        val elapsedOpen = strings.getValue("elapsed_open")
         elapsedTimerJob = lifecycleScope.launch {
             var seconds = 0
             while (true) {
@@ -189,8 +259,8 @@ class MainActivity : AppCompatActivity() {
                 val m = seconds / 60
                 val s = seconds % 60
                 val current = binding.textStatus.text?.toString().orEmpty()
-                val stage = current.substringBefore(" (경과")
-                binding.textStatus.text = String.format("%s (경과 %02d:%02d)", stage, m, s)
+                val stage = current.substringBefore(elapsedOpen)
+                binding.textStatus.text = String.format("%s%s%02d:%02d)", stage, elapsedOpen, m, s)
             }
         }
     }
@@ -213,7 +283,7 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(intent)
         } catch (e: Exception) {
-            toast("영상을 재생할 앱을 찾을 수 없습니다")
+            toast(strings.getValue("toast_no_player"))
         }
     }
 
@@ -225,7 +295,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivity(Intent.createChooser(intent, "공유하기"))
+        startActivity(Intent.createChooser(intent, strings.getValue("share_chooser_title")))
     }
 
     private fun toast(msg: String) {
