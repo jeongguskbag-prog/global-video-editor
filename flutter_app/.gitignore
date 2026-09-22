@@ -2,3 +2,5 @@
 .flutter-plugins
 .flutter-plugins-dependencies
 build/
+.idea/
+*.iml
