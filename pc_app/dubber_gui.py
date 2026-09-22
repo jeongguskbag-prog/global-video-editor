@@ -277,6 +277,79 @@ def probe_duration_seconds(path: str) -> float:
     return 10.0
 
 
+def build_atempo_chain(factor: float) -> str:
+    """Decomposes an arbitrary tempo factor into a chain of ffmpeg atempo filters,
+    each of which only accepts [0.5, 2.0]."""
+    remaining = min(max(factor, 0.05), 20.0)
+    parts = []
+    while remaining > 2.0:
+        parts.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        parts.append("atempo=0.5")
+        remaining /= 0.5
+    parts.append(f"atempo={remaining:.3f}")
+    return ",".join(parts)
+
+
+def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: dict, log) -> str:
+    """Synthesizes each segment's translated text as its own clip (rather than one
+    long blob), time-fits each clip to its original [start, end] window via ffmpeg's
+    atempo (speed only, pitch unaffected), and places every clip at its original
+    offset. Without this, one continuous TTS read has no natural pauses between
+    sentences (sounds rushed) and often finishes well before the video ends, leaving
+    the tail playing only the quieted original-language audio."""
+    seg_dir = os.path.join(task_dir, "tts_segments")
+    os.makedirs(seg_dir, exist_ok=True)
+    clips = []  # (start_ms, path)
+
+    for idx, (start, end, text) in enumerate(translated):
+        text = text.strip()
+        if not text:
+            continue
+        log(f"{strings['log_tts']} ({idx + 1}/{len(translated)})")
+        raw_path = os.path.join(seg_dir, f"seg_{idx}_raw.mp3")
+        asyncio.run(edge_tts.Communicate(text, voice_name).save(raw_path))
+        if not os.path.exists(raw_path) or os.path.getsize(raw_path) < 200:
+            continue
+
+        target_sec = end - start
+        actual_sec = probe_duration_seconds(raw_path)
+        clip_path = raw_path
+        if target_sec > 0.05 and actual_sec > 0.05:
+            fit_path = os.path.join(seg_dir, f"seg_{idx}_fit.wav")
+            res = subprocess.run(
+                [FFMPEG_EXE, "-y", "-i", raw_path, "-filter:a", build_atempo_chain(actual_sec / target_sec), fit_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            if res.returncode == 0 and os.path.exists(fit_path):
+                clip_path = fit_path
+        clips.append((int(start * 1000), clip_path))
+
+    dub_track_path = os.path.join(task_dir, "dub_track.wav")
+    if not clips:
+        subprocess.run(
+            [FFMPEG_EXE, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "1", dub_track_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        return dub_track_path
+
+    cmd = [FFMPEG_EXE, "-y"]
+    delay_parts = []
+    mix_labels = ""
+    for i, (start_ms, clip_path) in enumerate(clips):
+        cmd += ["-i", clip_path]
+        delay_parts.append(f"[{i}:a]adelay={start_ms}|{start_ms}[a{i}]")
+        mix_labels += f"[a{i}]"
+    filter_complex = (
+        ";".join(delay_parts)
+        + f";{mix_labels}amix=inputs={len(clips)}:duration=longest:dropout_transition=0:normalize=0[aout]"
+    )
+    cmd += ["-filter_complex", filter_complex, "-map", "[aout]", dub_track_path]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return dub_track_path
+
+
 def download_video_url(url: str, task_dir: str, input_path: str, strings: dict, log):
     last_pct = {"value": -1}
 
@@ -372,26 +445,22 @@ def run_pipeline(source: str, is_url: bool, lang_code: str, voice_name: str, mod
         video_path = input_path
 
         if want_dubbing:
-            full_text = " ".join(t for _, _, t in translated).strip() or "Dubbing complete."
-
-            log(strings["log_tts"])
-            temp_mp3 = os.path.join(task_dir, "tts.mp3")
-            asyncio.run(edge_tts.Communicate(full_text, voice_name).save(temp_mp3))
+            dub_track_path = synthesize_dub_track(translated, voice_name, task_dir, strings, log)
 
             log(strings["log_mixing"])
             dubbed_path = os.path.join(task_dir, "dubbed.mp4")
             if has_original_audio:
                 cmd = [
-                    FFMPEG_EXE, "-y", "-i", video_path, "-i", temp_mp3,
+                    FFMPEG_EXE, "-y", "-i", video_path, "-i", dub_track_path,
                     "-filter_complex",
-                    "[0:a]volume=0.25[a0];[1:a]volume=1.3[a1];"
+                    "[0:a]volume=0.2[a0];[1:a]volume=1.4[a1];"
                     "[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]",
                     "-map", "0:v:0", "-map", "[aout]",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", dubbed_path,
                 ]
             else:
                 cmd = [
-                    FFMPEG_EXE, "-y", "-i", video_path, "-i", temp_mp3,
+                    FFMPEG_EXE, "-y", "-i", video_path, "-i", dub_track_path,
                     "-map", "0:v:0", "-map", "1:a:0",
                     "-c:v", "copy", "-c:a", "aac", dubbed_path,
                 ]
@@ -399,7 +468,7 @@ def run_pipeline(source: str, is_url: bool, lang_code: str, voice_name: str, mod
             if res.returncode != 0 or not os.path.exists(dubbed_path):
                 log(strings["log_mix_fail"])
                 cmd_fallback = [
-                    FFMPEG_EXE, "-y", "-i", video_path, "-i", temp_mp3,
+                    FFMPEG_EXE, "-y", "-i", video_path, "-i", dub_track_path,
                     "-map", "0:v:0", "-map", "1:a:0",
                     "-c:v", "copy", "-c:a", "aac", dubbed_path,
                 ]

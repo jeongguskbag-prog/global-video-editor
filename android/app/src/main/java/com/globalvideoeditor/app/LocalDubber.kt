@@ -116,27 +116,26 @@ object LocalDubber {
 
         if (wantDubbing) {
             log(strings.getValue("log_tts"))
-            val fullText = segments.joinToString(" ") { it.translated }.ifBlank { "더빙이 완료되었습니다." }
-            val ttsFile = File(workDir, "tts.wav")
-            synthesizeSpeech(context, fullText, localeFor(langCode), ttsFile, strings)
+            val dubTrackFile = File(workDir, "dub_track.wav")
+            synthesizeSegmentsToTrack(context, segments, langCode, workDir, dubTrackFile, strings, log)
 
             log(strings.getValue("log_mixing"))
             val dubbedFile = File(workDir, "dubbed.mp4")
             val mixOk = if (hasOriginalAudio) {
                 runFfmpeg(
-                    "-y -i \"${videoFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
-                        "-filter_complex \"[0:a]volume=0.25[a0];[1:a]volume=1.3[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]\" " +
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${dubTrackFile.absolutePath}\" " +
+                        "-filter_complex \"[0:a]volume=0.2[a0];[1:a]volume=1.4[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]\" " +
                         "-map 0:v:0 -map \"[aout]\" -c:v copy -c:a aac -b:a 192k \"${dubbedFile.absolutePath}\""
                 )
             } else {
                 runFfmpeg(
-                    "-y -i \"${videoFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${dubTrackFile.absolutePath}\" " +
                         "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \"${dubbedFile.absolutePath}\""
                 )
             }
             if (!mixOk || !dubbedFile.exists()) {
                 runFfmpeg(
-                    "-y -i \"${videoFile.absolutePath}\" -i \"${ttsFile.absolutePath}\" " +
+                    "-y -i \"${videoFile.absolutePath}\" -i \"${dubTrackFile.absolutePath}\" " +
                         "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \"${dubbedFile.absolutePath}\""
                 )
             }
@@ -384,43 +383,120 @@ object LocalDubber {
         else -> Locale.US
     }
 
-    private suspend fun synthesizeSpeech(
+    /**
+     * Synthesizes each segment's translated text as its own clip (rather than one long
+     * blob), time-fits each clip to its original segment's [startMs, endMs] window via
+     * ffmpeg's atempo (speed only, pitch unaffected), and places every clip at its
+     * original offset. Without this, one continuous TTS read (a) has no natural pauses
+     * between sentences, making it sound rushed, and (b) often finishes well before the
+     * video ends, leaving the tail playing only the quieted original-language audio.
+     */
+    private suspend fun synthesizeSegmentsToTrack(
         context: Context,
-        text: String,
-        locale: Locale,
+        segments: List<Segment>,
+        langCode: String,
+        workDir: File,
         outFile: File,
-        strings: Map<String, String>
+        strings: Map<String, String>,
+        log: (String) -> Unit
     ) {
+        val locale = localeFor(langCode)
+        val segDir = File(workDir, "tts_segments").apply { mkdirs() }
+        val clips = mutableListOf<Pair<Long, File>>() // startMs, clip file
+
         val tts = createTts(context, strings)
         try {
             val result = tts.setLanguage(locale)
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 throw PipelineException(strings.getValue("err_tts_lang"))
             }
-            val utteranceId = UUID.randomUUID().toString()
-            suspendCancellableCoroutine<Unit> { cont ->
-                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {
-                        if (cont.isActive) cont.resume(Unit)
-                    }
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        if (cont.isActive) cont.resumeWithException(PipelineException(strings.getValue("err_tts_synth")))
-                    }
-                    override fun onError(utteranceId: String?, errorCode: Int) {
-                        if (cont.isActive) cont.resumeWithException(PipelineException("${strings.getValue("err_tts_synth")} (code $errorCode)"))
-                    }
-                })
-                val params = android.os.Bundle()
-                val res = tts.synthesizeToFile(text, params, outFile, utteranceId)
-                if (res != TextToSpeech.SUCCESS && cont.isActive) {
-                    cont.resumeWithException(PipelineException(strings.getValue("err_tts_request")))
+            for ((idx, seg) in segments.withIndex()) {
+                val text = seg.translated.trim()
+                if (text.isEmpty()) continue
+
+                log("${strings.getValue("log_tts")} (${idx + 1}/${segments.size})")
+                val rawFile = File(segDir, "seg_${idx}_raw.wav")
+                synthesizeUtterance(tts, text, rawFile, strings)
+                if (!rawFile.exists() || rawFile.length() < 200) continue
+
+                val targetSec = (seg.endMs - seg.startMs) / 1000.0
+                val actualSec = withContext(Dispatchers.IO) { probeDurationSeconds(rawFile) }
+                if (targetSec > 0.05 && actualSec > 0.05) {
+                    val tempo = actualSec / targetSec
+                    val fitFile = File(segDir, "seg_${idx}_fit.wav")
+                    val ok = runFfmpeg(
+                        "-y -i \"${rawFile.absolutePath}\" -filter:a \"${buildAtempoChain(tempo)}\" \"${fitFile.absolutePath}\""
+                    )
+                    clips.add(seg.startMs to (if (ok && fitFile.exists()) fitFile else rawFile))
+                } else {
+                    clips.add(seg.startMs to rawFile)
                 }
             }
         } finally {
             tts.stop()
             tts.shutdown()
+        }
+
+        if (clips.isEmpty()) {
+            runFfmpeg("-y -f lavfi -i anullsrc=r=44100:cl=stereo -t 1 \"${outFile.absolutePath}\"")
+            return
+        }
+
+        val inputArgs = StringBuilder()
+        val delayGraph = StringBuilder()
+        val mixLabels = StringBuilder()
+        clips.forEachIndexed { i, (startMs, file) ->
+            inputArgs.append("-i \"${file.absolutePath}\" ")
+            delayGraph.append("[$i:a]adelay=$startMs|$startMs[a$i];")
+            mixLabels.append("[a$i]")
+        }
+        delayGraph.append("${mixLabels}amix=inputs=${clips.size}:duration=longest:dropout_transition=0:normalize=0[aout]")
+        runFfmpeg("-y $inputArgs-filter_complex \"$delayGraph\" -map \"[aout]\" \"${outFile.absolutePath}\"")
+    }
+
+    /** Decomposes an arbitrary tempo factor into a chain of ffmpeg atempo filters,
+     * each of which only accepts [0.5, 2.0]. */
+    private fun buildAtempoChain(factor: Double): String {
+        var remaining = factor.coerceIn(0.05, 20.0)
+        val parts = mutableListOf<String>()
+        while (remaining > 2.0) {
+            parts.add("atempo=2.0")
+            remaining /= 2.0
+        }
+        while (remaining < 0.5) {
+            parts.add("atempo=0.5")
+            remaining /= 0.5
+        }
+        parts.add("atempo=${"%.3f".format(Locale.US, remaining)}")
+        return parts.joinToString(",")
+    }
+
+    private suspend fun synthesizeUtterance(
+        tts: TextToSpeech,
+        text: String,
+        outFile: File,
+        strings: Map<String, String>
+    ) {
+        val utteranceId = UUID.randomUUID().toString()
+        suspendCancellableCoroutine<Unit> { cont ->
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    if (cont.isActive) cont.resume(Unit)
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    if (cont.isActive) cont.resumeWithException(PipelineException(strings.getValue("err_tts_synth")))
+                }
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    if (cont.isActive) cont.resumeWithException(PipelineException("${strings.getValue("err_tts_synth")} (code $errorCode)"))
+                }
+            })
+            val params = android.os.Bundle()
+            val res = tts.synthesizeToFile(text, params, outFile, utteranceId)
+            if (res != TextToSpeech.SUCCESS && cont.isActive) {
+                cont.resumeWithException(PipelineException(strings.getValue("err_tts_request")))
+            }
         }
     }
 
