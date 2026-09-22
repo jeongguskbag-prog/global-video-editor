@@ -259,7 +259,8 @@ object LocalDubber {
                         YoutubeDL.getInstance().init(context)
                         youtubeDlInitialized = true
                     } catch (e: YoutubeDLException) {
-                        throw PipelineException("${strings.getValue("err_ytdl_init_prefix")}${e.message}")
+                        val detail = e.cause?.message?.let { " ($it)" }.orEmpty()
+                        throw PipelineException("${strings.getValue("err_ytdl_init_prefix")}${e.message}$detail")
                     }
                 }
             }
