@@ -1,7 +1,11 @@
 package com.globalvideoeditor.app
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -40,6 +44,10 @@ object LocalDubber {
 
     data class Segment(val startMs: Long, val endMs: Long, val sourceText: String, var translated: String = "")
 
+    /** [uri] is a content:// Uri in the public Movies/GlobalVideoDubber collection
+     * (visible in Gallery/Files apps), not a filesystem path. */
+    data class DubResult(val uri: Uri, val displayName: String)
+
     // Render's free tier spins down after inactivity and can take 30-60s to wake up,
     // so the license check needs a generous connect/read timeout, not OkHttp's 10s default.
     private val httpClient = OkHttpClient.Builder()
@@ -67,7 +75,7 @@ object LocalDubber {
         wantDubbing: Boolean,
         strings: Map<String, String>,
         log: (String) -> Unit
-    ): File {
+    ): DubResult {
         if (!wantSubtitle && !wantDubbing) {
             throw PipelineException(strings.getValue("err_pipeline_mode"))
         }
@@ -167,13 +175,57 @@ object LocalDubber {
             inputFile.copyTo(outputFile, overwrite = true)
         }
 
-        val moviesDir = context.getExternalFilesDir("Movies") ?: context.filesDir
-        if (!moviesDir.exists()) moviesDir.mkdirs()
-        val finalFile = File(moviesDir, "result_${langCode}_${System.currentTimeMillis()}.mp4")
-        outputFile.copyTo(finalFile, overwrite = true)
+        val displayName = "result_${langCode}_${System.currentTimeMillis()}.mp4"
+        val resultUri = saveToPublicMovies(context, outputFile, displayName, strings)
 
         workDir.deleteRecursively()
-        return finalFile
+        return DubResult(resultUri, displayName)
+    }
+
+    /** Saves into the shared Movies collection (visible in Gallery/Files apps) instead
+     * of the app-private external files dir -- on Android 10+, files under
+     * Android/data/<package>/ are hidden from every file browser and gallery app, so a
+     * result saved there looked to the user like it had vanished. */
+    private fun saveToPublicMovies(
+        context: Context,
+        sourceFile: File,
+        displayName: String,
+        strings: Map<String, String>
+    ): Uri {
+        val resolver = context.contentResolver
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/GlobalVideoDubber")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw PipelineException(strings.getValue("err_save_result"))
+            resolver.openOutputStream(uri)?.use { out ->
+                sourceFile.inputStream().use { input -> input.copyTo(out) }
+            } ?: throw PipelineException(strings.getValue("err_save_result"))
+            values.clear()
+            values.put(MediaStore.Video.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            return uri
+        }
+
+        // Pre-Android 10: MediaStore.RELATIVE_PATH isn't available; write directly to
+        // the public Movies directory and register it so it shows up immediately.
+        val publicDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+            "GlobalVideoDubber"
+        ).apply { mkdirs() }
+        val destFile = File(publicDir, displayName)
+        sourceFile.copyTo(destFile, overwrite = true)
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.DATA, destFile.absolutePath)
+        }
+        return resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            ?: Uri.fromFile(destFile)
     }
 
     private suspend fun verifyLicense(serverUrl: String, licenseKey: String, deviceId: String) {

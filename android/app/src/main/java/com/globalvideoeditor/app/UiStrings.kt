@@ -58,6 +58,8 @@ object UiStrings {
         "err_pipeline_source" to "영상 파일을 선택하거나 URL을 입력해야 합니다",
         "err_tts_lang" to "이 언어의 음성 데이터가 폰에 설치되어 있지 않습니다 (설정 > 일반 > 언어 및 입력 > 텍스트 음성 변환에서 설치 필요)",
         "err_open_video" to "영상 파일을 열 수 없습니다",
+        "err_save_result" to "결과 영상을 저장할 수 없습니다",
+        "status_saved_hint" to " (동영상 > GlobalVideoDubber 폴더에 저장됨)",
         "err_download_fail_prefix" to "영상 다운로드 실패: ",
         "err_no_downloaded_file" to "다운로드된 영상 파일을 찾을 수 없습니다",
         "err_model_download_fail_prefix" to "모델 다운로드 실패 (HTTP ",

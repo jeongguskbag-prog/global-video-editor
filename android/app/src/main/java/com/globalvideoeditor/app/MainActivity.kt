@@ -12,13 +12,11 @@ import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.globalvideoeditor.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -33,7 +31,7 @@ class MainActivity : AppCompatActivity() {
 
     private var selectedVideoUri: Uri? = null
     private var selectedVideoName: String = "input.mp4"
-    private var resultFile: File? = null
+    private var resultUri: Uri? = null
     private var elapsedTimerJob: Job? = null
 
     private var strings: Map<String, String> = UiStrings.KO
@@ -204,7 +202,7 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                val outFile = LocalDubber.verifyLicenseAndRun(
+                val result = LocalDubber.verifyLicenseAndRun(
                     context = applicationContext,
                     serverUrl = SERVER_URL,
                     licenseKey = licenseKey,
@@ -220,8 +218,11 @@ class MainActivity : AppCompatActivity() {
                     log = { message -> runOnUiThread { binding.textStatus.text = message } }
                 )
 
-                resultFile = outFile
-                setLoading(false, s.getValue("status_done_prefix") + outFile.absolutePath)
+                resultUri = result.uri
+                setLoading(
+                    false,
+                    s.getValue("status_done_prefix") + result.displayName + s.getValue("status_saved_hint")
+                )
                 binding.layoutResultActions.visibility = View.VISIBLE
 
             } catch (e: LocalDubber.PipelineException) {
@@ -269,8 +270,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playResult() {
-        val file = resultFile ?: return
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val uri = resultUri ?: return
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "video/mp4")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -283,8 +283,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareResult() {
-        val file = resultFile ?: return
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val uri = resultUri ?: return
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
