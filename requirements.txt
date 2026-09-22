@@ -5,5 +5,4 @@ edge-tts
 deep-translator
 faster-whisper
 requests
-yt-dlp
 imageio-ffmpeg

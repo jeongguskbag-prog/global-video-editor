@@ -11,10 +11,10 @@ import traceback
 from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 import edge_tts
 from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
-import yt_dlp
 import imageio_ffmpeg
 
 app = FastAPI(title="AI Global Video Editor Studio")
@@ -35,6 +35,21 @@ def get_whisper_model():
         GLOBAL_WHISPER = WhisperModel("tiny", device="cpu", compute_type="int8", cpu_threads=1, download_root="/tmp/whisper_model")
     return GLOBAL_WHISPER
 
+def probe_duration_seconds(path: str) -> float:
+    try:
+        out = subprocess.run([FFMPEG_EXE, "-i", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for line in out.stderr.splitlines():
+            line = line.strip()
+            if line.startswith("Duration:"):
+                ts = line.split("Duration:")[1].split(",")[0].strip()
+                h, m, s = ts.split(":")
+                return int(h) * 3600 + int(m) * 60 + float(s)
+    except Exception:
+        pass
+    return 5.0
+
+MAX_UPLOAD_BYTES = 300 * 1024 * 1024  # 300MB
+
 RATE_LIMIT_PER_MINUTE = 15
 CLIENT_REQUEST_LOG = defaultdict(list)
 RENDER_SEMAPHORE = asyncio.Semaphore(1)
@@ -48,12 +63,15 @@ def is_rate_limited(client_ip: str) -> bool:
     CLIENT_REQUEST_LOG[client_ip].append(now)
     return False
 
+MASTER_LICENSE_KEY = os.environ.get("MASTER_LICENSE_KEY", "")
+
 LICENSES = {
-    "DEV-MASTER-FREEPASS": {"owner": "Developer", "device": None},
     "VIP-KEY-001": {"owner": "User1", "device": None},
     "VIP-KEY-002": {"owner": "User2", "device": None},
     "VIP-KEY-003": {"owner": "User3", "device": None}
 }
+if MASTER_LICENSE_KEY:
+    LICENSES[MASTER_LICENSE_KEY] = {"owner": "Developer", "device": None}
 
 LANG_OPTIONS = {
     "ko": {"female": "ko-KR-SunHiNeural", "male": "ko-KR-InJoonNeural"},
@@ -84,33 +102,40 @@ def translate_text(text: str, target_code: str) -> str:
     except Exception:
         return text
 
-def download_video_stream(url: str, output_path: str) -> bool:
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': output_path,
-        'quiet': True,
-        'no_warnings': True,
-        'overwrites': True,
-        'nocheckcertificate': True,
-        'socket_timeout': 30,
-        'max_filesize': 250 * 1024 * 1024,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Sec-Fetch-Mode': 'navigate'
-        },
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}}
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 1024
-    except Exception:
-        return False
-
 @app.get("/")
 def root():
     return {"status": "ok", "service": "AI Global Video Editor Running"}
+
+def check_license(license_key: str, device_id: str):
+    """Returns None if valid, or a JSONResponse with the error if not."""
+    if license_key not in LICENSES:
+        return JSONResponse(status_code=403, content={"error": "유효하지 않은 라이선스 키입니다."})
+
+    lic = LICENSES[license_key]
+    if not (MASTER_LICENSE_KEY and license_key == MASTER_LICENSE_KEY):
+        if lic["device"] is None:
+            lic["device"] = device_id
+        elif lic["device"] != device_id:
+            return JSONResponse(status_code=403, content={"error": "이미 다른 기기에 등록된 라이선스입니다."})
+    return None
+
+@app.post("/api/verify_license")
+@app.post("/api/verify_license/")
+async def verify_license(
+    request: Request,
+    license_key: str = Form(""),
+    device_id: str = Form("UNKNOWN_DEVICE")
+):
+    """Lightweight check used by clients that render locally (e.g. the Android app's
+    on-device pipeline) and only need to confirm the license before proceeding."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if is_rate_limited(client_ip):
+        return JSONResponse(status_code=429, content={"error": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
+
+    err = check_license(license_key, device_id)
+    if err:
+        return err
+    return {"valid": True}
 
 @app.post("/api/render_file")
 @app.post("/api/render_file/")
@@ -118,26 +143,19 @@ def root():
 async def process_video_file(
     request: Request,
     file: UploadFile = File(None),
-    video_url: str = Form(None),
     target_lang: str = Form("ko"),
     gender: str = Form("female"),
     mode: str = Form("dynamic_subtitle"),
-    license_key: str = Form("DEV-MASTER-FREEPASS"),
+    license_key: str = Form(""),
     device_id: str = Form("UNKNOWN_DEVICE")
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
     if is_rate_limited(client_ip):
         return JSONResponse(status_code=429, content={"error": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
 
-    if license_key not in LICENSES:
-        return JSONResponse(status_code=403, content={"error": "유효하지 않은 라이선스 키입니다."})
-
-    lic = LICENSES[license_key]
-    if license_key != "DEV-MASTER-FREEPASS":
-        if lic["device"] is None:
-            lic["device"] = device_id
-        elif lic["device"] != device_id:
-            return JSONResponse(status_code=403, content={"error": "이미 다른 기기에 등록된 라이선스입니다."})
+    err = check_license(license_key, device_id)
+    if err:
+        return err
 
     task_id = str(os.urandom(6).hex())
     task_dir = os.path.join(WORK_DIR, task_id)
@@ -146,38 +164,44 @@ async def process_video_file(
 
     try:
         if file and file.filename:
+            total = 0
             with open(input_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-        elif video_url and len(video_url.strip()) >= 5:
-            if not download_video_stream(video_url.strip(), input_path):
-                return JSONResponse(status_code=400, content={"error": "영상 다운로드에 실패했습니다. 링크를 확인하세요."})
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_UPLOAD_BYTES:
+                        return JSONResponse(status_code=413, content={"error": "파일이 너무 큽니다 (최대 300MB)."})
+                    buffer.write(chunk)
         else:
-            return JSONResponse(status_code=400, content={"error": "동영상 파일이나 링크를 제공해 주세요."})
+            return JSONResponse(status_code=400, content={"error": "동영상 파일을 선택해 주세요."})
 
         async with RENDER_SEMAPHORE:
             audio_path = os.path.join(task_dir, "audio.wav")
-            
+
             # 1. 오디오 추출
             cmd_audio = [
                 FFMPEG_EXE, "-y", "-i", input_path,
                 "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                 audio_path
             ]
-            subprocess.run(cmd_audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.to_thread(subprocess.run, cmd_audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             has_original_audio = os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000
             if not has_original_audio:
+                duration = await asyncio.to_thread(probe_duration_seconds, input_path)
                 cmd_silent = [
                     FFMPEG_EXE, "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
-                    "-t", "5", "-acodec", "pcm_s16le", audio_path
+                    "-t", str(duration), "-acodec", "pcm_s16le", audio_path
                 ]
-                subprocess.run(cmd_silent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                await asyncio.to_thread(subprocess.run, cmd_silent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # 2. 음성 인식 (STT)
             segment_list = []
             try:
-                model = get_whisper_model()
-                segments, _ = model.transcribe(audio_path, beam_size=1, vad_filter=False)
+                model = await asyncio.to_thread(get_whisper_model)
+                segments, _ = await asyncio.to_thread(model.transcribe, audio_path, beam_size=1, vad_filter=False)
                 segment_list = list(segments)
             except Exception as e:
                 print(f"STT 에러 (무시): {e}")
@@ -206,7 +230,7 @@ async def process_video_file(
                     "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy",
                     output_path
                 ]
-                res_sub = subprocess.run(cmd_sub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                res_sub = await asyncio.to_thread(subprocess.run, cmd_sub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 # 실패 시 소프트 자막으로 스트림 결합
                 if res_sub.returncode != 0 or not os.path.exists(output_path):
@@ -215,7 +239,7 @@ async def process_video_file(
                         "-c", "copy", "-c:s", "mov_text",
                         output_path
                     ]
-                    subprocess.run(cmd_soft, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await asyncio.to_thread(subprocess.run, cmd_soft, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # 3-B. 더빙 모드 (Edge-TTS + 안전 믹싱)
             else:
@@ -250,7 +274,7 @@ async def process_video_file(
                         output_path
                     ]
 
-                res_dub = subprocess.run(cmd_dub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                res_dub = await asyncio.to_thread(subprocess.run, cmd_dub, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 # 믹싱 실패 시 TTS 오디오로 단순 교체 폴백
                 if res_dub.returncode != 0 or not os.path.exists(output_path):
@@ -260,19 +284,26 @@ async def process_video_file(
                         "-c:v", "copy", "-c:a", "aac",
                         output_path
                     ]
-                    subprocess.run(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await asyncio.to_thread(subprocess.run, cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # 4. 최종 방어 (원본 파일 보존 반환)
             if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
                 shutil.copy(input_path, output_path)
 
-            return FileResponse(output_path, media_type="video/mp4", filename=f"result_{target_lang}.mp4")
+            def cleanup():
+                shutil.rmtree(task_dir, ignore_errors=True)
+                gc.collect()
+
+            return FileResponse(
+                output_path,
+                media_type="video/mp4",
+                filename=f"result_{target_lang}.mp4",
+                background=BackgroundTask(cleanup)
+            )
 
     except Exception as e:
         err_detail = traceback.format_exc()
         print(f"서버 에러 상세:\n{err_detail}")
-        return JSONResponse(status_code=500, content={"error": f"렌더링 실패: {str(e)}"})
-
-    finally:
         shutil.rmtree(task_dir, ignore_errors=True)
         gc.collect()
+        return JSONResponse(status_code=500, content={"error": f"렌더링 실패: {str(e)}"})
