@@ -277,19 +277,25 @@ def probe_duration_seconds(path: str) -> float:
     return 10.0
 
 
+INTER_SEGMENT_GAP_MS = 150
+
+
 def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: dict, log) -> str:
     """Synthesizes each segment's translated text as its own clip (rather than one
-    long blob) and places every clip at its original offset, at the TTS engine's
-    natural (standard) speaking rate -- no speed-up or slow-down at all, even if a
-    clip overruns its original [start, end] window. Without the per-segment split, one
-    continuous TTS read has no natural pauses between sentences (sounds rushed) and
-    often finishes well before the video ends, leaving the tail playing only the
-    quieted original-language audio. Time-fitting each clip to its slot was tried and
-    reverted: it made speech sound unnaturally slow or rushed depending on how the
-    translated text's natural length compared to the original segment's duration."""
+    long blob) at the TTS engine's natural, standard rate -- no speed-up or slow-down
+    at all. Each clip is placed at its original timestamp or right after the previous
+    clip ends, whichever is later, so clips never overlap (a translated sentence often
+    takes longer to say than the original did, so placing every clip at its own
+    timestamp risked two clips playing over each other and garbling the audio). A
+    single continuous TTS read, by contrast, has no natural pauses between sentences
+    (sounds rushed) and often finishes well before the video ends, leaving the tail
+    playing only the quieted original-language audio; per-segment placement fixes both
+    without altering speech rate, at the cost of drifting slightly out of sync with
+    the video over a long run."""
     seg_dir = os.path.join(task_dir, "tts_segments")
     os.makedirs(seg_dir, exist_ok=True)
-    clips = []  # (start_ms, path)
+    clips = []  # (placement_ms, path)
+    cursor_ms = 0
 
     for idx, (start, _end, text) in enumerate(translated):
         text = text.strip()
@@ -301,7 +307,10 @@ def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: di
         if not os.path.exists(raw_path) or os.path.getsize(raw_path) < 200:
             continue
 
-        clips.append((int(start * 1000), raw_path))
+        actual_ms = int(probe_duration_seconds(raw_path) * 1000)
+        placement_ms = max(int(start * 1000), cursor_ms)
+        clips.append((placement_ms, raw_path))
+        cursor_ms = placement_ms + actual_ms + INTER_SEGMENT_GAP_MS
 
     dub_track_path = os.path.join(task_dir, "dub_track.wav")
     if not clips:

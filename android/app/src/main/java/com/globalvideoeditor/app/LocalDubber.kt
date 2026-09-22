@@ -41,6 +41,7 @@ object LocalDubber {
 
     private const val MODEL_FILENAME = "ggml-base.bin"
     private const val MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+    private const val INTER_SEGMENT_GAP_MS = 150L
 
     data class Segment(val startMs: Long, val endMs: Long, val sourceText: String, var translated: String = "")
 
@@ -437,11 +438,12 @@ object LocalDubber {
 
     /**
      * Synthesizes each segment's translated text as its own clip (rather than one long
-     * blob), time-fits each clip to its original segment's [startMs, endMs] window via
-     * ffmpeg's atempo (speed only, pitch unaffected), and places every clip at its
-     * original offset. Without this, one continuous TTS read (a) has no natural pauses
-     * between sentences, making it sound rushed, and (b) often finishes well before the
-     * video ends, leaving the tail playing only the quieted original-language audio.
+     * blob) at the TTS engine's natural, standard rate, and places each clip at its
+     * original timestamp or right after the previous clip ends, whichever is later, so
+     * clips never overlap. A single continuous TTS read has no natural pauses between
+     * sentences (sounds rushed) and often finishes well before the video ends, leaving
+     * the tail playing only the quieted original-language audio; per-segment placement
+     * fixes both without altering speech rate.
      */
     private suspend fun synthesizeSegmentsToTrack(
         context: Context,
@@ -454,7 +456,16 @@ object LocalDubber {
     ) {
         val locale = localeFor(langCode)
         val segDir = File(workDir, "tts_segments").apply { mkdirs() }
-        val clips = mutableListOf<Pair<Long, File>>() // startMs, clip file
+        val clips = mutableListOf<Pair<Long, File>>() // placementMs, clip file
+        // Every clip plays at the TTS engine's natural (standard) rate -- never sped up
+        // or slowed down to fit its original slot, since that made speech sound
+        // unnatural. But a translated sentence often takes longer to say than the
+        // original did, so placing every clip at its original timestamp risked two
+        // clips overlapping and playing at once (audio garbling on top of itself).
+        // Track a cursor instead: a clip starts at its own timestamp, or right after
+        // the previous clip ends, whichever is later -- so clips never overlap, at the
+        // cost of drifting slightly out of sync with the video over a long run.
+        var cursorMs = 0L
 
         val tts = createTts(context, strings)
         try {
@@ -471,11 +482,10 @@ object LocalDubber {
                 synthesizeUtterance(tts, text, rawFile, strings)
                 if (!rawFile.exists() || rawFile.length() < 200) continue
 
-                // Always play at the TTS engine's natural (standard) rate -- no atempo
-                // adjustment at all, even if a clip overruns its original slot. Fitting
-                // clips to their slot (speeding up or slowing down) made speech sound
-                // unnatural; a natural, standard pace matters more than exact timing.
-                clips.add(seg.startMs to rawFile)
+                val actualMs = (withContext(Dispatchers.IO) { probeDurationSeconds(rawFile) } * 1000).toLong()
+                val placementMs = maxOf(seg.startMs, cursorMs)
+                clips.add(placementMs to rawFile)
+                cursorMs = placementMs + actualMs + INTER_SEGMENT_GAP_MS
             }
         } finally {
             tts.stop()
