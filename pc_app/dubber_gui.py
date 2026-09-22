@@ -313,13 +313,19 @@ def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: di
         if not os.path.exists(raw_path) or os.path.getsize(raw_path) < 200:
             continue
 
+        # Only ever speed a clip up (never slow it down) when it overruns its slot,
+        # and cap how much -- slowing a short read down to fill its slot dragged
+        # speech out unnaturally, and speeding an overrun up past ~1.35x starts to
+        # sound rushed again. A clip that finishes early just leaves a natural gap
+        # before the next segment's timestamp.
         target_sec = end - start
         actual_sec = probe_duration_seconds(raw_path)
+        tempo = (actual_sec / target_sec) if target_sec > 0.05 else 1.0
         clip_path = raw_path
-        if target_sec > 0.05 and actual_sec > 0.05:
+        if tempo > 1.05:
             fit_path = os.path.join(seg_dir, f"seg_{idx}_fit.wav")
             res = subprocess.run(
-                [FFMPEG_EXE, "-y", "-i", raw_path, "-filter:a", build_atempo_chain(actual_sec / target_sec), fit_path],
+                [FFMPEG_EXE, "-y", "-i", raw_path, "-filter:a", build_atempo_chain(min(tempo, 1.35)), fit_path],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             if res.returncode == 0 and os.path.exists(fit_path):

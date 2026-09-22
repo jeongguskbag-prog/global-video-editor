@@ -419,13 +419,18 @@ object LocalDubber {
                 synthesizeUtterance(tts, text, rawFile, strings)
                 if (!rawFile.exists() || rawFile.length() < 200) continue
 
+                // Only ever speed a clip up (never slow it down) when it overruns its
+                // slot, and cap how much -- slowing a short read down to fill its slot
+                // dragged speech out unnaturally, and speeding an overrun up past ~1.35x
+                // starts to sound rushed again. A clip that finishes early just leaves a
+                // natural gap before the next segment's timestamp.
                 val targetSec = (seg.endMs - seg.startMs) / 1000.0
                 val actualSec = withContext(Dispatchers.IO) { probeDurationSeconds(rawFile) }
-                if (targetSec > 0.05 && actualSec > 0.05) {
-                    val tempo = actualSec / targetSec
+                val tempo = if (targetSec > 0.05) actualSec / targetSec else 1.0
+                if (tempo > 1.05) {
                     val fitFile = File(segDir, "seg_${idx}_fit.wav")
                     val ok = runFfmpeg(
-                        "-y -i \"${rawFile.absolutePath}\" -filter:a \"${buildAtempoChain(tempo)}\" \"${fitFile.absolutePath}\""
+                        "-y -i \"${rawFile.absolutePath}\" -filter:a \"${buildAtempoChain(tempo.coerceAtMost(1.35))}\" \"${fitFile.absolutePath}\""
                     )
                     clips.add(seg.startMs to (if (ok && fitFile.exists()) fitFile else rawFile))
                 } else {
