@@ -25,7 +25,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val SERVER_URL = "https://global-video-editor.onrender.com"
         // 개인용 빌드: 기기 잠금이 없는 마스터 라이선스 키를 내장해서 입력창을 숨긴다.
-        private const val EMBEDDED_LICENSE_KEY = "b3ed6984203cf97cc352d1c2d9551c9e"
+        private const val EMBEDDED_LICENSE_KEY = "9b5c575413a0f84b94a4a9f1e3af2de2"
     }
 
     private lateinit var binding: ActivityMainBinding
