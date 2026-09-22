@@ -16,7 +16,6 @@ object UiStrings {
     // languageCodes list in MainActivity: ko, en, zh, es, ja, de, fr, vi
     private val FIXED: Map<String, String> = linkedMapOf(
         "app_subtitle" to "AI 자막 / 더빙 자동 변환",
-        "label_license" to "라이선스 키",
         "label_ui_lang" to "프로그램 언어",
         "label_source" to "영상 소스",
         "btn_pick_video" to "갤러리에서 영상 선택",
@@ -34,7 +33,6 @@ object UiStrings {
         "btn_play" to "재생",
         "btn_share" to "공유",
         "share_chooser_title" to "공유하기",
-        "toast_need_license" to "라이선스 키를 입력해 주세요",
         "toast_need_source" to "영상 파일을 선택하거나 URL을 입력해 주세요",
         "toast_need_mode" to "자막 또는 더빙 중 최소 하나를 선택해 주세요",
         "toast_no_player" to "영상을 재생할 앱을 찾을 수 없습니다",

@@ -24,6 +24,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val SERVER_URL = "https://global-video-editor.onrender.com"
+        // 개인용 빌드: 기기 잠금이 없는 마스터 라이선스 키를 내장해서 입력창을 숨긴다.
+        private const val EMBEDDED_LICENSE_KEY = "b3ed6984203cf97cc352d1c2d9551c9e"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -59,7 +61,8 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.editLicenseKey.setText(prefs.getString("license_key", ""))
+        binding.editLicenseKey.setText(EMBEDDED_LICENSE_KEY)
+        binding.layoutLicenseKey.visibility = View.GONE
 
         binding.spinnerGender.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("", ""))
 
@@ -113,7 +116,6 @@ class MainActivity : AppCompatActivity() {
         val s = strings
         binding.textAppSubtitle.text = s.getValue("app_subtitle")
         binding.labelUiLang.text = s.getValue("label_ui_lang")
-        binding.layoutLicenseKey.hint = s.getValue("label_license")
         binding.labelSource.text = s.getValue("label_source")
         binding.btnPickVideo.text = s.getValue("btn_pick_video")
         if (selectedVideoUri == null) {
@@ -178,12 +180,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRender() {
         val s = strings
-        val licenseKey = binding.editLicenseKey.text?.toString()?.trim().orEmpty()
+        val licenseKey = EMBEDDED_LICENSE_KEY
 
-        if (licenseKey.isBlank()) {
-            toast(s.getValue("toast_need_license"))
-            return
-        }
         val urlText = binding.editVideoUrl.text?.toString()?.trim().orEmpty()
         val uri = selectedVideoUri
         if (urlText.isBlank() && uri == null) {
@@ -196,8 +194,6 @@ class MainActivity : AppCompatActivity() {
             toast(s.getValue("toast_need_mode"))
             return
         }
-
-        prefs.edit().putString("license_key", licenseKey).apply()
 
         val langCode = languageCodes[binding.spinnerLanguage.selectedItemPosition]
         val genderCode = genderCodes[binding.spinnerGender.selectedItemPosition]
