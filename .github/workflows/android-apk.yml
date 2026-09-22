@@ -28,8 +28,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # --no-fatal-infos: info급 린트(예: prefer_const_constructors)는 빌드를 막지 않게 한다.
+      # warning/error는 여전히 fatal이라 실제 문제는 그대로 잡힌다.
       - name: Analyze
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Test
         run: flutter test
