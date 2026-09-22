@@ -131,9 +131,18 @@ object LocalDubber {
             log(strings.getValue("log_mixing"))
             val dubbedFile = File(workDir, "dubbed.mp4")
             val mixOk = if (hasOriginalAudio) {
+                // The TTS dub track and the original video audio are almost never at the
+                // same sample rate (TTS engines commonly output 22050/24000Hz, video
+                // audio is usually 44100/48000Hz). Without forcing both to a common rate
+                // before amix, ffmpeg's format auto-negotiation isn't reliable here and
+                // the lower-rate track can get played back as if it were the higher
+                // rate -- audibly sped up and pitched up. volume=0.05 (not 0.2) so the
+                // original is effectively muted rather than just quieter.
                 runFfmpeg(
                     "-y -i \"${videoFile.absolutePath}\" -i \"${dubTrackFile.absolutePath}\" " +
-                        "-filter_complex \"[0:a]volume=0.2[a0];[1:a]volume=1.4[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]\" " +
+                        "-filter_complex \"[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.05[a0];" +
+                        "[1:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1.4[a1];" +
+                        "[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]\" " +
                         "-map 0:v:0 -map \"[aout]\" -c:v copy -c:a aac -b:a 192k \"${dubbedFile.absolutePath}\""
                 )
             } else {
@@ -502,7 +511,7 @@ object LocalDubber {
         val mixLabels = StringBuilder()
         clips.forEachIndexed { i, (startMs, file) ->
             inputArgs.append("-i \"${file.absolutePath}\" ")
-            delayGraph.append("[$i:a]adelay=$startMs|$startMs[a$i];")
+            delayGraph.append("[$i:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=$startMs|$startMs[a$i];")
             mixLabels.append("[a$i]")
         }
         delayGraph.append("${mixLabels}amix=inputs=${clips.size}:duration=longest:dropout_transition=0:normalize=0[aout]")

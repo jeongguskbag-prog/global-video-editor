@@ -325,7 +325,9 @@ def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: di
     mix_labels = ""
     for i, (start_ms, clip_path) in enumerate(clips):
         cmd += ["-i", clip_path]
-        delay_parts.append(f"[{i}:a]adelay={start_ms}|{start_ms}[a{i}]")
+        delay_parts.append(
+            f"[{i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay={start_ms}|{start_ms}[a{i}]"
+        )
         mix_labels += f"[a{i}]"
     filter_complex = (
         ";".join(delay_parts)
@@ -436,10 +438,16 @@ def run_pipeline(source: str, is_url: bool, lang_code: str, voice_name: str, mod
             log(strings["log_mixing"])
             dubbed_path = os.path.join(task_dir, "dubbed.mp4")
             if has_original_audio:
+                # edge-tts and the original video audio are almost never at the same
+                # sample rate, and without forcing both to a common rate before amix,
+                # the lower-rate track can get played back as if it were the higher
+                # rate -- audibly sped up and pitched up. volume=0.05 (not 0.2) so the
+                # original is effectively muted rather than just quieter.
                 cmd = [
                     FFMPEG_EXE, "-y", "-i", video_path, "-i", dub_track_path,
                     "-filter_complex",
-                    "[0:a]volume=0.2[a0];[1:a]volume=1.4[a1];"
+                    "[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.05[a0];"
+                    "[1:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=1.4[a1];"
                     "[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]",
                     "-map", "0:v:0", "-map", "[aout]",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", dubbed_path,
