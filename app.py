@@ -65,11 +65,25 @@ def is_rate_limited(client_ip: str) -> bool:
 
 MASTER_LICENSE_KEY = os.environ.get("MASTER_LICENSE_KEY", "")
 
-LICENSES = {
-    "VIP-KEY-001": {"owner": "User1", "device": None},
-    "VIP-KEY-002": {"owner": "User2", "device": None},
-    "VIP-KEY-003": {"owner": "User3", "device": None}
-}
+# Issued licenses live in the LICENSES_JSON env var (Render dashboard -> Environment),
+# not in this file, so a new key can be issued without editing code or redeploying from
+# a commit. Format: {"KEY-STRING": {"owner": "고객 이름 또는 메모"}, ...}
+# Falls back to a couple of local test keys when the env var isn't set (e.g. local dev).
+try:
+    LICENSES = {
+        key: {"owner": info.get("owner", ""), "device": None}
+        for key, info in json.loads(os.environ.get("LICENSES_JSON", "{}")).items()
+    }
+except (json.JSONDecodeError, AttributeError):
+    LICENSES = {}
+
+if not LICENSES:
+    LICENSES = {
+        "VIP-KEY-001": {"owner": "User1", "device": None},
+        "VIP-KEY-002": {"owner": "User2", "device": None},
+        "VIP-KEY-003": {"owner": "User3", "device": None},
+    }
+
 if MASTER_LICENSE_KEY:
     LICENSES[MASTER_LICENSE_KEY] = {"owner": "Developer", "device": None}
 
