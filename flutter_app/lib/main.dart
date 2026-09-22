@@ -494,8 +494,8 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
-              children: [
+            Row(
+              children: const [
                 Icon(Icons.bolt, color: Colors.amber, size: 24),
                 SizedBox(width: 8),
                 Text('API 연산 크레딧 충전 (마진 50% 보호)', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -530,7 +530,7 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
   void _startCreditPurchase(BuildContext sheetCtx, {required int credits, required num priceUsdt}) {
     Navigator.pop(sheetCtx);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('결제 연동 준비 중입니다. 문의: $kSupportEmail')),
+      SnackBar(content: Text('결제 연동 준비 중입니다. 문의: $kSupportEmail')),
     );
   }
 
@@ -845,7 +845,7 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('예상 강제청산가', style: TextStyle(color: Colors.white60, fontSize: 12)),
-                  Text('${_getLiquidationPrice().toStringAsFixed(1)} USDT', style: const TextStyle(color: sellColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text('${_getLiquidationPrice().toStringAsFixed(1)} USDT', style: TextStyle(color: sellColor, fontWeight: FontWeight.bold, fontSize: 13)),
                 ],
               ),
             ),
@@ -876,8 +876,8 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Row(
-                    children: [
+                  Row(
+                    children: const [
                       Icon(Icons.mail_outline, color: Colors.amber, size: 16),
                       SizedBox(width: 8),
                       Text('프로그램 문의: $kSupportEmail', style: TextStyle(color: Colors.white70, fontSize: 12)),
