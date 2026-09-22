@@ -471,23 +471,11 @@ object LocalDubber {
                 synthesizeUtterance(tts, text, rawFile, strings)
                 if (!rawFile.exists() || rawFile.length() < 200) continue
 
-                // Only ever speed a clip up (never slow it down) when it overruns its
-                // slot, and cap how much -- slowing a short read down to fill its slot
-                // dragged speech out unnaturally, and speeding an overrun up past ~1.35x
-                // starts to sound rushed again. A clip that finishes early just leaves a
-                // natural gap before the next segment's timestamp.
-                val targetSec = (seg.endMs - seg.startMs) / 1000.0
-                val actualSec = withContext(Dispatchers.IO) { probeDurationSeconds(rawFile) }
-                val tempo = if (targetSec > 0.05) actualSec / targetSec else 1.0
-                if (tempo > 1.05) {
-                    val fitFile = File(segDir, "seg_${idx}_fit.wav")
-                    val ok = runFfmpeg(
-                        "-y -i \"${rawFile.absolutePath}\" -filter:a \"${buildAtempoChain(tempo.coerceAtMost(1.35))}\" \"${fitFile.absolutePath}\""
-                    )
-                    clips.add(seg.startMs to (if (ok && fitFile.exists()) fitFile else rawFile))
-                } else {
-                    clips.add(seg.startMs to rawFile)
-                }
+                // Always play at the TTS engine's natural (standard) rate -- no atempo
+                // adjustment at all, even if a clip overruns its original slot. Fitting
+                // clips to their slot (speeding up or slowing down) made speech sound
+                // unnatural; a natural, standard pace matters more than exact timing.
+                clips.add(seg.startMs to rawFile)
             }
         } finally {
             tts.stop()
@@ -509,23 +497,6 @@ object LocalDubber {
         }
         delayGraph.append("${mixLabels}amix=inputs=${clips.size}:duration=longest:dropout_transition=0:normalize=0[aout]")
         runFfmpeg("-y $inputArgs-filter_complex \"$delayGraph\" -map \"[aout]\" \"${outFile.absolutePath}\"")
-    }
-
-    /** Decomposes an arbitrary tempo factor into a chain of ffmpeg atempo filters,
-     * each of which only accepts [0.5, 2.0]. */
-    private fun buildAtempoChain(factor: Double): String {
-        var remaining = factor.coerceIn(0.05, 20.0)
-        val parts = mutableListOf<String>()
-        while (remaining > 2.0) {
-            parts.add("atempo=2.0")
-            remaining /= 2.0
-        }
-        while (remaining < 0.5) {
-            parts.add("atempo=0.5")
-            remaining /= 0.5
-        }
-        parts.add("atempo=${"%.3f".format(Locale.US, remaining)}")
-        return parts.joinToString(",")
     }
 
     private suspend fun synthesizeUtterance(

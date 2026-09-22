@@ -277,33 +277,21 @@ def probe_duration_seconds(path: str) -> float:
     return 10.0
 
 
-def build_atempo_chain(factor: float) -> str:
-    """Decomposes an arbitrary tempo factor into a chain of ffmpeg atempo filters,
-    each of which only accepts [0.5, 2.0]."""
-    remaining = min(max(factor, 0.05), 20.0)
-    parts = []
-    while remaining > 2.0:
-        parts.append("atempo=2.0")
-        remaining /= 2.0
-    while remaining < 0.5:
-        parts.append("atempo=0.5")
-        remaining /= 0.5
-    parts.append(f"atempo={remaining:.3f}")
-    return ",".join(parts)
-
-
 def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: dict, log) -> str:
     """Synthesizes each segment's translated text as its own clip (rather than one
-    long blob), time-fits each clip to its original [start, end] window via ffmpeg's
-    atempo (speed only, pitch unaffected), and places every clip at its original
-    offset. Without this, one continuous TTS read has no natural pauses between
-    sentences (sounds rushed) and often finishes well before the video ends, leaving
-    the tail playing only the quieted original-language audio."""
+    long blob) and places every clip at its original offset, at the TTS engine's
+    natural (standard) speaking rate -- no speed-up or slow-down at all, even if a
+    clip overruns its original [start, end] window. Without the per-segment split, one
+    continuous TTS read has no natural pauses between sentences (sounds rushed) and
+    often finishes well before the video ends, leaving the tail playing only the
+    quieted original-language audio. Time-fitting each clip to its slot was tried and
+    reverted: it made speech sound unnaturally slow or rushed depending on how the
+    translated text's natural length compared to the original segment's duration."""
     seg_dir = os.path.join(task_dir, "tts_segments")
     os.makedirs(seg_dir, exist_ok=True)
     clips = []  # (start_ms, path)
 
-    for idx, (start, end, text) in enumerate(translated):
+    for idx, (start, _end, text) in enumerate(translated):
         text = text.strip()
         if not text:
             continue
@@ -313,24 +301,7 @@ def synthesize_dub_track(translated, voice_name: str, task_dir: str, strings: di
         if not os.path.exists(raw_path) or os.path.getsize(raw_path) < 200:
             continue
 
-        # Only ever speed a clip up (never slow it down) when it overruns its slot,
-        # and cap how much -- slowing a short read down to fill its slot dragged
-        # speech out unnaturally, and speeding an overrun up past ~1.35x starts to
-        # sound rushed again. A clip that finishes early just leaves a natural gap
-        # before the next segment's timestamp.
-        target_sec = end - start
-        actual_sec = probe_duration_seconds(raw_path)
-        tempo = (actual_sec / target_sec) if target_sec > 0.05 else 1.0
-        clip_path = raw_path
-        if tempo > 1.05:
-            fit_path = os.path.join(seg_dir, f"seg_{idx}_fit.wav")
-            res = subprocess.run(
-                [FFMPEG_EXE, "-y", "-i", raw_path, "-filter:a", build_atempo_chain(min(tempo, 1.35)), fit_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            if res.returncode == 0 and os.path.exists(fit_path):
-                clip_path = fit_path
-        clips.append((int(start * 1000), clip_path))
+        clips.append((int(start * 1000), raw_path))
 
     dub_track_path = os.path.join(task_dir, "dub_track.wav")
     if not clips:
