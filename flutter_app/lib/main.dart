@@ -7,7 +7,19 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'trading_engine.dart';
+
 const String kSupportEmail = "pjk6322@gmail.com";
+
+// 다중 코인 감시(자동매매)에서 스캔할 후보 Top 5. 수동 매매(상단 코인 표시)는
+// BTCUSDT 고정이며 이 목록의 영향을 받지 않는다.
+const List<String> kAvailableSymbols = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'BNBUSDT',
+  'SOLUSDT',
+  'XRPUSDT',
+];
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -343,6 +355,18 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
   WebSocketChannel? _channel;
   Timer? _reconnectTimer;
 
+  // 자동매매(데모/페이퍼트레이딩) 상태. 실제 거래소 주문은 보내지 않고
+  // 가상 잔고로 시뮬레이션만 한다 — _executeSecureOrder()와 마찬가지로
+  // 이 프로토타입에는 인증된 거래소 주문 API 연동이 없기 때문.
+  bool _autoTradeRunning = false;
+  // 켜면 코인 하나(_symbol) 대신 kAvailableSymbols(5개) 전부를 매 틱마다
+  // 스캔해서, 포지션이 없을 때 신호가 뜬 코인에 진입한다. 포지션이 열리면
+  // 청산될 때까지 그 코인만 관리한다(한 번에 포지션 하나). 수동 매매
+  // (상단 코인 표시, 주문 폼)에는 영향 없음.
+  bool _multiSymbolScan = false;
+  AutoTradeEngine? _autoEngine;
+  AutoTradeStatus? _autoStatus;
+
   @override
   void initState() {
     super.initState();
@@ -510,6 +534,38 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
     );
   }
 
+  void _toggleAutoTrade() {
+    if (_autoTradeRunning) {
+      _autoEngine?.stop();
+      _autoEngine = null;
+      setState(() => _autoTradeRunning = false);
+      return;
+    }
+
+    final symbols = _multiSymbolScan ? kAvailableSymbols : [_symbol];
+    const capitalUsdt = 5000.0;
+    final marginPerTrade = capitalUsdt * (_selectedPercent / 100);
+
+    final engine = AutoTradeEngine(
+      symbols: symbols,
+      leverage: _leverage,
+      marginPerTradeUsdt: marginPerTrade,
+      stopLossPercent: 3,
+      takeProfitPercent: 6,
+      demoBalance: capitalUsdt,
+      onUpdate: (status) {
+        if (!mounted) return;
+        setState(() => _autoStatus = status);
+      },
+    );
+    _autoEngine = engine;
+    engine.start();
+    setState(() {
+      _autoTradeRunning = true;
+      _autoStatus = null;
+    });
+  }
+
   void _showSecurityAlert(String msg) {
     showDialog(
       context: context,
@@ -569,6 +625,7 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
     _promoTimer?.cancel();
     _reconnectTimer?.cancel();
     _channel?.sink.close();
+    _autoEngine?.stop();
     _priceController.dispose();
     _qtyController.dispose();
     super.dispose();
@@ -809,6 +866,9 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
             ),
             const SizedBox(height: 14),
 
+            _buildAutoTradeCard(buyColor, sellColor),
+            const SizedBox(height: 14),
+
             // 프로그램 문의 및 고객센터 배너
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -835,6 +895,147 @@ class _MainEnterpriseScreenState extends State<MainEnterpriseScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  String _positionLabel(StrategyPosition p) {
+    switch (p) {
+      case StrategyPosition.long:
+        return '롱';
+      case StrategyPosition.short:
+        return '숏';
+      case StrategyPosition.none:
+        return '없음';
+    }
+  }
+
+  Widget _buildAutoTradeCard(Color buyColor, Color sellColor) {
+    final status = _autoStatus;
+    final watching = _multiSymbolScan
+        ? kAvailableSymbols.map((s) => s.replaceAll('USDT', '')).join(' / ')
+        : _symbol.replaceAll('USDT', '');
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E222D),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.smart_toy_outlined, color: Colors.amber, size: 18),
+              SizedBox(width: 8),
+              Text('자동매매 (데모/페이퍼트레이딩)',
+                  style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '실제 거래소에 주문을 보내지 않고 실시간 시세로 가상 잔고를 시뮬레이션합니다. '
+            '전략: 5/20 이동평균 크로스, 손절 -3% / 익절 +6%.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text('다중 코인 감시', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              ),
+              Switch(
+                value: _multiSymbolScan,
+                activeThumbColor: Colors.amber,
+                onChanged: _autoTradeRunning
+                    ? null
+                    : (v) => setState(() => _multiSymbolScan = v),
+              ),
+            ],
+          ),
+          Text(
+            _multiSymbolScan
+                ? '포지션이 없을 때 5개 코인(BTC/ETH/BNB/SOL/XRP)을 모두 스캔해서 신호가 뜬 코인에 진입합니다. 진입 후에는 청산될 때까지 그 코인만 관리합니다.'
+                : '$_symbol 한 코인만 감시합니다.',
+            style: const TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _autoTradeRunning ? sellColor : buyColor,
+              ),
+              onPressed: _toggleAutoTrade,
+              child: Text(
+                _autoTradeRunning ? '자동매매 중지' : '자동매매 시작 (데모)',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+          ),
+          if (_autoTradeRunning) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFF262932), borderRadius: BorderRadius.circular(6)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('감시 중: $watching', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                  const SizedBox(height: 6),
+                  if (status == null)
+                    const Text('첫 신호 확인 중...', style: TextStyle(color: Colors.white38, fontSize: 12))
+                  else if (status.event == AutoTradeEvent.error)
+                    Text('오류: ${status.message}', style: TextStyle(color: sellColor, fontSize: 12))
+                  else
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('${status.symbol} · 포지션: ${_positionLabel(status.position)}',
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                            Text('현재가: ${status.price.toStringAsFixed(2)}',
+                                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                        if (status.entryPrice != null) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('진입가: ${status.entryPrice!.toStringAsFixed(2)}',
+                                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                              if (status.unrealizedPnl != null)
+                                Text(
+                                  '평가손익: ${status.unrealizedPnl! >= 0 ? "+" : ""}${status.unrealizedPnl!.toStringAsFixed(2)} USDT',
+                                  style: TextStyle(
+                                      color: status.unrealizedPnl! >= 0 ? buyColor : sellColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                            ],
+                          ),
+                        ],
+                        if (status.message != null) ...[
+                          const SizedBox(height: 4),
+                          Text(status.message!, style: const TextStyle(color: Colors.amber, fontSize: 11)),
+                        ],
+                        const SizedBox(height: 4),
+                        Text('데모 잔고: ${status.demoBalance.toStringAsFixed(2)} USDT',
+                            style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
