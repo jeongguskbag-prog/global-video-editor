@@ -1,0 +1,31 @@
+name: Build slot game APK
+
+on:
+  push:
+    paths:
+      - "android-slot/**"
+      - "slot-game/**"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        working-directory: android-slot
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slot-game-apk
+          path: android-slot/app/build/outputs/apk/debug/app-debug.apk
