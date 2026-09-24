@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jade Bamboo Slots</title>
+<style>
+  :root {
+    --cell: min(15vw, 110px);
+    --gold: #ffd54a;
+    --bamboo: #c9a54a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    font-family: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+    color: #fff;
+    background: radial-gradient(ellipse at top, #2f7d3a 0%, #0f3a1c 55%, #06200e 100%);
+    display: flex; flex-direction: column; align-items: center;
+    overflow-x: hidden;
+    user-select: none;
+  }
+  .jackpots { display: flex; gap: 10px; margin: 14px 0 8px; flex-wrap: wrap; justify-content: center; }
+  .jp { text-align: center; border-radius: 8px; padding: 4px 12px 6px; min-width: 120px;
+        border: 2px solid var(--gold); box-shadow: 0 0 12px rgba(255,213,74,.4); }
+  .jp .name { font-weight: 900; font-size: 18px; letter-spacing: 1px; text-shadow: 0 2px 0 #000; }
+  .jp .val { font-weight: 800; font-size: 17px; background: rgba(0,0,0,.45); border-radius: 4px; padding: 1px 8px; margin-top: 2px; }
+  .jp.mini  { background: linear-gradient(#5b7bd8,#2a3f8f); }
+  .jp.minor { background: linear-gradient(#34a0c9,#16566e); }
+  .jp.major { background: linear-gradient(#56c13d,#23661a); }
+  .jp.grand { background: linear-gradient(#e33a3a,#8a0f0f); transform: scale(1.12); }
+  .jp.grand .name { color: var(--gold); }
+
+  .frame {
+    position: relative; padding: 12px;
+    background: linear-gradient(90deg, #8a6d24, var(--bamboo) 20%, #f0d67a 50%, var(--bamboo) 80%, #8a6d24);
+    border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.6);
+  }
+  .reels { display: flex; gap: 4px; background: #300a14; padding: 4px; border-radius: 4px; position: relative; }
+  .reel { width: var(--cell); height: calc(var(--cell) * 3); overflow: hidden; position: relative;
+          background: radial-gradient(circle, #7d1830 0%, #3d0918 100%); }
+  .strip { position: absolute; left: 0; top: 0; width: 100%; will-change: transform; }
+  .cell { width: var(--cell); height: var(--cell); display: flex; align-items: center; justify-content: center;
+          flex-direction: column; position: relative; }
+  .sym { font-size: calc(var(--cell) * .58); line-height: 1; filter: drop-shadow(0 3px 3px rgba(0,0,0,.6)); }
+  .letter { font-size: calc(var(--cell) * .6); font-weight: 900; font-family: Georgia, serif;
+            -webkit-text-stroke: 2px #3b0a00; text-shadow: 0 4px 0 #3b0a00; }
+  .L-A { color: #ff5a4a; } .L-K { color: #3ed36a; } .L-Q { color: #4aa8ff; } .L-J { color: #ffb13b; } .L-10 { color: #d77bff; font-size: calc(var(--cell) * .48); }
+  .tag { position: absolute; bottom: 6%; font-size: calc(var(--cell) * .14); font-weight: 900;
+         background: linear-gradient(#ffe68a,#c78b10); color: #4a1d00; padding: 0 6px; border-radius: 4px; }
+  .coin .val { position: absolute; bottom: 8%; font-size: calc(var(--cell) * .15); font-weight: 900; color: var(--gold);
+               text-shadow: 0 2px 0 #000, 0 0 6px #000; }
+  .cell.win { animation: pulse .5s ease-in-out infinite alternate; }
+  .cell.win::after { content: ""; position: absolute; inset: 2px; border: 3px solid var(--gold); border-radius: 8px; box-shadow: 0 0 14px var(--gold) inset, 0 0 14px var(--gold); }
+  .cell.dim { opacity: .35; }
+  .cell.held { background: radial-gradient(circle, #b8860b 0%, #5a3c00 100%); }
+  @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+
+  .banner { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+            flex-direction: column; background: rgba(0,0,0,.65); z-index: 5; border-radius: 4px; text-align: center; }
+  .banner.show { display: flex; }
+  .banner h2 { font-size: 40px; color: var(--gold); text-shadow: 0 3px 0 #7a4b00, 0 0 20px #ffb300; }
+  .banner p { font-size: 26px; font-weight: 800; margin-top: 6px; }
+
+  .bar { width: min(96vw, 760px); margin-top: 12px; display: grid; grid-template-columns: 1fr auto 1fr;
+         align-items: center; gap: 10px; background: rgba(0,0,0,.55); border-radius: 10px; padding: 10px 14px; }
+  .info { font-size: 14px; line-height: 1.6; }
+  .info b { color: var(--gold); font-size: 16px; }
+  .center { text-align: center; }
+  .msg { min-height: 22px; font-weight: 700; color: var(--gold); }
+  .controls { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  button { cursor: pointer; border: none; font-weight: 800; color: #fff; }
+  .small { width: 36px; height: 36px; border-radius: 50%; background: #2c2c2c; border: 2px solid #777; font-size: 20px; }
+  .spin { width: 76px; height: 76px; border-radius: 50%; font-size: 30px;
+          background: radial-gradient(circle at 35% 30%, #ff6b6b, #b71c1c 70%); border: 4px solid #ffe08a;
+          box-shadow: 0 0 14px rgba(255,80,80,.7); }
+  .spin:disabled { filter: grayscale(.7); cursor: default; }
+  .auto { padding: 6px 10px; border-radius: 16px; background: #1f5f2c; border: 2px solid #4cb862; font-size: 13px; }
+  .auto.on { background: #b88a00; border-color: var(--gold); }
+  .note { font-size: 11px; opacity: .6; margin: 10px 0 16px; text-align: center; padding: 0 16px; }
+  .paytable { width: min(96vw, 760px); background: rgba(0,0,0,.4); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-top: 10px; }
+  .paytable summary { cursor: pointer; font-weight: 800; color: var(--gold); }
+  .paytable table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .paytable td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,.1); }
+  @media (max-width: 560px) {
+    .bar { grid-template-columns: 1fr 1fr; }
+    .center { grid-column: 1 / -1; order: -1; }
+    .jp { min-width: 80px; padding: 3px 6px; }
+    .jp .name { font-size: 13px; } .jp .val { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="jackpots">
+  <div class="jp mini"><div class="name">MINI</div><div class="val" id="jp-mini"></div></div>
+  <div class="jp minor"><div class="name">MINOR</div><div class="val" id="jp-minor"></div></div>
+  <div class="jp grand"><div class="name">GRAND</div><div class="val" id="jp-grand"></div></div>
+  <div class="jp major"><div class="name">MAJOR</div><div class="val" id="jp-major"></div></div>
+</div>
+
+<div class="frame">
+  <div class="reels" id="reels"></div>
+  <div class="banner" id="banner"><h2 id="banner-title"></h2><p id="banner-text"></p></div>
+</div>
+
+<div class="bar">
+  <div class="info">
+    크레딧 <b id="credit"></b><br>
+    베팅 <b id="bet"></b>
+  </div>
+  <div class="center">
+    <div class="msg" id="msg">스핀을 눌러 시작하세요</div>
+    <div class="info" id="sub"></div>
+  </div>
+  <div class="controls">
+    <button class="small" id="minus">−</button>
+    <button class="spin" id="spinBtn">⟳</button>
+    <button class="small" id="plus">+</button>
+    <button class="auto" id="autoBtn">AUTO</button>
+  </div>
+</div>
+
+<details class="paytable">
+  <summary>게임 규칙 / 배당표</summary>
+  <p style="margin-top:8px">5릴 × 3행, 20 페이라인. 왼쪽 릴부터 연속 3개 이상 일치하면 당첨. 🐉 WILD는 스캐터·코인을 제외한 모든 심볼을 대체합니다.<br>
+  🏮 스캐터 3개 이상 → 프리 스핀 10회 (프리 스핀 중 당첨금 2배).<br>
+  💰 코인 6개 이상 → 홀드 앤 스핀: 코인이 고정되고 3회 리스핀, 새 코인이 나오면 3회로 초기화. 15칸을 모두 채우면 GRAND 잭팟.</p>
+  <table id="payTable"></table>
+</details>
+
+<p class="note">가상 크레딧 전용 오락용 게임입니다. 실제 돈이 오가지 않으며 현금으로 교환할 수 없습니다.</p>
+
+<script>
+(() => {
+  const ROWS = 3, COLS = 5;
+  const BETS = [20, 40, 100, 200, 400, 1000, 2000];
+
+  // id, display, weight, pays[3,4,5] (multiplied by line bet)
+  const SYMBOLS = [
+    { id: 'WILD',  html: '<span class="sym">🐉</span><span class="tag">WILD</span>', w: 3,  pay: [20, 80, 400] },
+    { id: 'TIGER', html: '<span class="sym">🐯</span>', w: 5,  pay: [10, 40, 200] },
+    { id: 'TURT',  html: '<span class="sym">🐢</span>', w: 6,  pay: [8, 30, 150] },
+    { id: 'TOAD',  html: '<span class="sym">🐸</span>', w: 7,  pay: [6, 20, 100] },
+    { id: 'KOI',   html: '<span class="sym">🐟</span>', w: 8,  pay: [5, 15, 75] },
+    { id: 'A',     html: '<span class="letter L-A">A</span>',   w: 11, pay: [3, 8, 30] },
+    { id: 'K',     html: '<span class="letter L-K">K</span>',   w: 11, pay: [3, 8, 30] },
+    { id: 'Q',     html: '<span class="letter L-Q">Q</span>',   w: 12, pay: [2, 5, 20] },
+    { id: 'J',     html: '<span class="letter L-J">J</span>',   w: 12, pay: [2, 5, 20] },
+    { id: '10',    html: '<span class="letter L-10">10</span>', w: 12, pay: [2, 5, 20] },
+    { id: 'SCAT',  html: '<span class="sym">🏮</span><span class="tag">BONUS</span>', w: 3, pay: null },
+    { id: 'COIN',  html: null, w: 5, pay: null },
+  ];
+  const SYM = Object.fromEntries(SYMBOLS.map(s => [s.id, s]));
+  const TOTAL_W = SYMBOLS.reduce((a, s) => a + s.w, 0);
+
+  // 20 paylines, each entry = row index per column
+  const LINES = [
+    [1,1,1,1,1],[0,0,0,0,0],[2,2,2,2,2],[0,1,2,1,0],[2,1,0,1,2],
+    [0,0,1,2,2],[2,2,1,0,0],[1,0,0,0,1],[1,2,2,2,1],[1,0,1,2,1],
+    [1,2,1,0,1],[0,1,1,1,0],[2,1,1,1,2],[0,1,0,1,0],[2,1,2,1,2],
+    [1,1,0,1,1],[1,1,2,1,1],[0,0,2,0,0],[2,2,0,2,2],[0,2,0,2,0],
+  ];
+
+  const JP_MULT = { MINI: 10, MINOR: 25, MAJOR: 100, GRAND: 1000 }; // × total bet
+
+  // ---- state ----
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+  let credit = store.get('jbs_credit', 100000);
+  let betIdx = store.get('jbs_bet', 2);
+  let grid = [];            // grid[col][row] = {id, coin?}
+  let spinning = false, auto = false, freeSpins = 0, freeTotal = 0;
+
+  const $ = id => document.getElementById(id);
+  const fmt = n => '₩' + Math.round(n).toLocaleString('ko-KR');
+  const bet = () => BETS[betIdx];
+  const lineBet = () => bet() / LINES.length;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function randSym(noCoin = false) {
+    let r = Math.random() * TOTAL_W;
+    for (const s of SYMBOLS) {
+      if ((r -= s.w) < 0) {
+        if (noCoin && s.id === 'COIN') return randSym(true);
+        return s.id === 'COIN' ? makeCoin() : { id: s.id };
+      }
+    }
+    return { id: 'A' };
+  }
+  function makeCoin() {
+    const r = Math.random();
+    if (r < 0.02) return { id: 'COIN', jp: 'MAJOR' };
+    if (r < 0.07) return { id: 'COIN', jp: 'MINOR' };
+    if (r < 0.15) return { id: 'COIN', jp: 'MINI' };
+    const mults = [1, 1, 2, 2, 3, 5, 8, 10];
+    return { id: 'COIN', mult: mults[Math.floor(Math.random() * mults.length)] };
+  }
+  function coinValue(c) { return c.jp ? JP_MULT[c.jp] * bet() : c.mult * bet(); }
+
+  function cellHTML(s) {
+    if (s.id === 'COIN') {
+      const label = s.jp ? s.jp : fmt(coinValue(s));
+      return `<span class="sym">💰</span><span class="val">${label}</span>`;
+    }
+    return SYM[s.id].html;
+  }
+
+  // ---- DOM ----
+  const reelEls = [];
+  function buildReels() {
+    const wrap = $('reels');
+    for (let c = 0; c < COLS; c++) {
+      const reel = document.createElement('div'); reel.className = 'reel';
+      const strip = document.createElement('div'); strip.className = 'strip';
+      reel.appendChild(strip); wrap.appendChild(reel);
+      reelEls.push(strip);
+      grid[c] = [randSym(), randSym(), randSym()];
+      renderStrip(c, grid[c]);
+    }
+  }
+  function renderStrip(c, syms) {
+    const strip = reelEls[c];
+    strip.style.transition = 'none';
+    strip.style.transform = 'translateY(0)';
+    strip.innerHTML = syms.map((s, r) => `<div class="cell ${s.id === 'COIN' ? 'coin' : ''}" data-c="${c}" data-r="${r}">${cellHTML(s)}</div>`).join('');
+  }
+  const cellEl = (c, r) => reelEls[c].querySelector(`.cell[data-r="${r}"]`);
+
+  function cellPx() { return reelEls[0].parentElement.clientHeight / ROWS; }
+
+  async function spinReel(c, finalSyms, delay, extra) {
+    const strip = reelEls[c];
+    const filler = Array.from({ length: extra }, () => randSym());
+    // strip top→bottom: final symbols, fillers, current symbols (so it scrolls downward)
+    const all = [...finalSyms, ...filler, ...grid[c]];
+    strip.style.transition = 'none';
+    strip.innerHTML = all.map((s, i) => `<div class="cell ${s.id === 'COIN' ? 'coin' : ''}" data-i="${i}">${cellHTML(s)}</div>`).join('');
+    const h = cellPx();
+    strip.style.transform = `translateY(${-(all.length - ROWS) * h}px)`;
+    strip.offsetHeight; // reflow
+    await sleep(delay);
+    const dur = 0.35 + extra * 0.045;
+    strip.style.transition = `transform ${dur}s cubic-bezier(.25,.1,.25,1.08)`;
+    strip.style.transform = 'translateY(0)';
+    await sleep(dur * 1000 + 30);
+    grid[c] = finalSyms;
+    renderStrip(c, finalSyms);
+  }
+
+  // ---- evaluation ----
+  function evaluate() {
+    const wins = [];
+    LINES.forEach((line, li) => {
+      const syms = line.map((r, c) => grid[c][r].id);
+      let base = syms.find(s => s !== 'WILD');
+      if (base === 'SCAT' || base === 'COIN') base = null;
+      // count wilds-only run too
+      const target = base || 'WILD';
+      let n = 0;
+      for (const s of syms) { if (s === target || s === 'WILD') n++; else break; }
+      // compare with pure-wild run value
+      let wildRun = 0; for (const s of syms) { if (s === 'WILD') wildRun++; else break; }
+      let best = { id: target, n };
+      if (wildRun >= 3 && target !== 'WILD') {
+        const vW = SYM.WILD.pay[wildRun - 3], vT = n >= 3 ? SYM[target].pay[n - 3] : 0;
+        if (vW > vT) best = { id: 'WILD', n: wildRun };
+      }
+      if (best.n >= 3 && SYM[best.id].pay) {
+        wins.push({ line: li, n: best.n, id: best.id, amt: SYM[best.id].pay[best.n - 3] * lineBet() });
+      }
+    });
+    const scat = [];
+    const coins = [];
+    for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS; r++) {
+      if (grid[c][r].id === 'SCAT') scat.push([c, r]);
+      if (grid[c][r].id === 'COIN') coins.push([c, r]);
+    }
+    return { wins, scat, coins };
+  }
+
+  function clearHighlights() {
+    document.querySelectorAll('.cell').forEach(e => e.classList.remove('win', 'dim', 'held'));
+  }
+  function highlight(positions) {
+    const set = new Set(positions.map(p => p.join(',')));
+    for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS; r++) {
+      const e = cellEl(c, r); if (!e) continue;
+      e.classList.toggle('win', set.has(`${c},${r}`));
+      e.classList.toggle('dim', !set.has(`${c},${r}`));
+    }
+  }
+
+  async function banner(title, text, ms = 2200) {
+    $('banner-title').textContent = title; $('banner-text').textContent = text;
+    $('banner').classList.add('show');
+    await sleep(ms);
+    $('banner').classList.remove('show');
+  }
+
+  // ---- hold & spin ----
+  async function holdAndSpin(startCoins) {
+    await banner('HOLD & SPIN', '코인이 고정됩니다! 리스핀 3회', 2000);
+    const held = new Map(startCoins.map(([c, r]) => [`${c},${r}`, grid[c][r]]));
+    let respins = 3;
+    const markHeld = () => held.forEach((_, k) => { const [c, r] = k.split(',').map(Number); cellEl(c, r)?.classList.add('held'); });
+    clearHighlights(); markHeld();
+    while (respins > 0 && held.size < 15) {
+      $('sub').textContent = `리스핀 남음: ${respins} · 코인 ${held.size}/15`;
+      const jobs = [];
+      let newCoin = false;
+      for (let c = 0; c < COLS; c++) {
+        const final = [];
+        for (let r = 0; r < ROWS; r++) {
+          const k = `${c},${r}`;
+          if (held.has(k)) final.push(held.get(k));
+          else if (Math.random() < 0.13) { const coin = makeCoin(); final.push(coin); held.set(k, coin); newCoin = true; }
+          else final.push({ id: 'BLANK' });
+        }
+        jobs.push(respinColumn(c, final, held));
+      }
+      await Promise.all(jobs);
+      markHeld();
+      respins = newCoin ? 3 : respins - 1;
+      await sleep(350);
+    }
+    let total = 0;
+    held.forEach(c => total += coinValue(c));
+    if (held.size === 15) { total += JP_MULT.GRAND * bet(); await banner('GRAND JACKPOT!', fmt(JP_MULT.GRAND * bet()), 3000); }
+    $('sub').textContent = '';
+    await banner('보너스 종료', fmt(total), 2500);
+    // restore normal symbols on screen
+    for (let c = 0; c < COLS; c++) { grid[c] = grid[c].map(() => randSym(true)); renderStrip(c, grid[c]); }
+    return total;
+  }
+  async function respinColumn(c, final, held) {
+    // animate only non-held cells by flashing new content
+    const strip = reelEls[c];
+    for (let r = 0; r < ROWS; r++) {
+      const e = cellEl(c, r);
+      if (!held.has(`${c},${r}`) || final[r].id === 'COIN') e.style.opacity = '.4';
+    }
+    await sleep(250 + c * 120);
+    strip.innerHTML = final.map((s, r) => `<div class="cell ${s.id === 'COIN' ? 'coin' : ''}" data-c="${c}" data-r="${r}">${s.id === 'BLANK' ? '' : cellHTML(s)}</div>`).join('');
+    grid[c] = final;
+  }
+
+  // ---- main spin ----
+  async function spin() {
+    if (spinning) return;
+    const isFree = freeSpins > 0;
+    if (!isFree && credit < bet()) { $('msg').textContent = '크레딧이 부족합니다'; stopAuto(); return; }
+    spinning = true; $('spinBtn').disabled = true;
+    clearHighlights();
+    if (isFree) { freeSpins--; } else { credit -= bet(); }
+    updateUI();
+    $('msg').textContent = isFree ? `프리 스핀! 남은 횟수 ${freeSpins}` : '행운을 빕니다...';
+
+    const finals = Array.from({ length: COLS }, () => [randSym(), randSym(), randSym()]);
+    await Promise.all(finals.map((f, c) => spinReel(c, f, c * 90, 14 + c * 5)));
+
+    const { wins, scat, coins } = evaluate();
+    let won = wins.reduce((a, w) => a + w.amt, 0);
+    if (isFree) won *= 2;
+    if (scat.length >= 3) won += bet() * (scat.length === 3 ? 2 : scat.length === 4 ? 10 : 50);
+
+    if (won > 0) {
+      credit += won; if (isFree) freeTotal += won;
+      $('msg').textContent = `당첨! ${fmt(won)}`;
+      const pos = [];
+      wins.forEach(w => { for (let c = 0; c < w.n; c++) pos.push([c, LINES[w.line][c]]); });
+      if (scat.length >= 3) pos.push(...scat);
+      highlight(pos);
+      updateUI();
+      if (won >= bet() * 15) await banner(won >= bet() * 50 ? 'MEGA WIN' : 'BIG WIN', fmt(won), 2000);
+      else await sleep(900);
+    } else if (!isFree) {
+      $('msg').textContent = '다시 도전하세요';
+    }
+
+    if (scat.length >= 3) {
+      highlight(scat);
+      const add = 10;
+      if (freeSpins === 0 && !isFree) freeTotal = 0;
+      freeSpins += add;
+      await banner(isFree ? '리트리거!' : '프리 스핀', `${add}회 획득`, 2000);
+    }
+
+    if (coins.length >= 6) {
+      const bonus = await holdAndSpin(coins);
+      credit += bonus; if (isFree) freeTotal += bonus;
+      $('msg').textContent = `보너스 당첨 ${fmt(bonus)}`;
+    }
+
+    if (isFree && freeSpins === 0) {
+      await banner('프리 스핀 종료', `총 ${fmt(freeTotal)}`, 2500);
+    }
+
+    updateUI();
+    spinning = false; $('spinBtn').disabled = false;
+    if (freeSpins > 0 || auto) { await sleep(freeSpins > 0 ? 500 : 700); spin(); }
+  }
+
+  // ---- UI ----
+  function updateUI() {
+    $('credit').textContent = fmt(credit);
+    $('bet').textContent = fmt(bet());
+    $('jp-mini').textContent = fmt(JP_MULT.MINI * bet());
+    $('jp-minor').textContent = fmt(JP_MULT.MINOR * bet());
+    $('jp-major').textContent = fmt(JP_MULT.MAJOR * bet());
+    $('jp-grand').textContent = fmt(JP_MULT.GRAND * bet());
+    $('sub').textContent = freeSpins > 0 ? `남은 프리 스핀 ${freeSpins}` : (auto ? '자동 스핀 중' : '');
+    const lock = spinning || freeSpins > 0;
+    $('minus').disabled = lock; $('plus').disabled = lock;
+    store.set('jbs_credit', credit); store.set('jbs_bet', betIdx);
+    if (credit < BETS[0] && !spinning && freeSpins === 0) {
+      $('msg').textContent = '크레딧 소진 — 100,000 충전되었습니다';
+      credit = 100000; store.set('jbs_credit', credit); $('credit').textContent = fmt(credit);
+    }
+  }
+  function stopAuto() { auto = false; $('autoBtn').classList.remove('on'); updateUI(); }
+
+  function buildPaytable() {
+    const rows = SYMBOLS.filter(s => s.pay).map(s =>
+      `<tr><td>${s.id === 'WILD' ? '🐉 WILD' : s.html.replace(/class="[^"]*"/g, '')}</td>
+       <td>3개 ×${s.pay[0]}</td><td>4개 ×${s.pay[1]}</td><td>5개 ×${s.pay[2]}</td></tr>`).join('');
+    $('payTable').innerHTML = `<tr><td colspan="4" style="opacity:.7">배당은 라인 베팅(총 베팅 ÷ 20) 기준</td></tr>` + rows +
+      `<tr><td>🏮 스캐터</td><td>3개 ×2</td><td>4개 ×10</td><td>5개 ×50 (총 베팅)</td></tr>`;
+  }
+
+  $('spinBtn').onclick = () => spin();
+  $('minus').onclick = () => { if (betIdx > 0) { betIdx--; updateUI(); } };
+  $('plus').onclick = () => { if (betIdx < BETS.length - 1) { betIdx++; updateUI(); } };
+  $('autoBtn').onclick = () => {
+    auto = !auto; $('autoBtn').classList.toggle('on', auto); updateUI();
+    if (auto && !spinning) spin();
+  };
+  document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); spin(); } });
+  window.addEventListener('resize', () => { for (let c = 0; c < COLS; c++) renderStrip(c, grid[c]); });
+
+  buildReels(); buildPaytable(); updateUI();
+})();
+</script>
+</body>
+</html>
