@@ -15,7 +15,9 @@
     min-height: 100vh;
     font-family: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
     color: #fff;
-    background: radial-gradient(ellipse at top, #2f7d3a 0%, #0f3a1c 55%, #06200e 100%);
+    background:
+      repeating-linear-gradient(95deg, transparent 0 60px, rgba(120,200,60,.18) 60px 72px, transparent 72px 140px),
+      radial-gradient(ellipse at top, #3aa0c8 0%, #1f7d3a 45%, #0a3a14 100%);
     display: flex; flex-direction: column; align-items: center;
     overflow-x: hidden;
     user-select: none;
@@ -23,7 +25,7 @@
   .jackpots { display: flex; gap: 10px; margin: 14px 0 8px; flex-wrap: wrap; justify-content: center; }
   .jp { text-align: center; border-radius: 8px; padding: 4px 12px 6px; min-width: 120px;
         border: 2px solid var(--gold); box-shadow: 0 0 12px rgba(255,213,74,.4); }
-  .jp .name { font-weight: 900; font-size: 18px; letter-spacing: 1px; text-shadow: 0 2px 0 #000; }
+  .jp .name { font-weight: 900; font-size: 18px; font-family: Impact, "Arial Black", sans-serif; letter-spacing: 1px; text-shadow: 0 2px 0 #000; }
   .jp .val { font-weight: 800; font-size: 17px; background: rgba(0,0,0,.45); border-radius: 4px; padding: 1px 8px; margin-top: 2px; }
   .jp.mini  { background: linear-gradient(#5b7bd8,#2a3f8f); }
   .jp.minor { background: linear-gradient(#34a0c9,#16566e); }
@@ -33,19 +35,36 @@
 
   .frame {
     position: relative; padding: 12px;
-    background: linear-gradient(90deg, #8a6d24, var(--bamboo) 20%, #f0d67a 50%, var(--bamboo) 80%, #8a6d24);
+    background: repeating-linear-gradient(90deg, #c9a54a 0 46px, #7a5a18 46px 50px), repeating-linear-gradient(0deg, #c9a54a 0 46px, #7a5a18 46px 50px);
+    border: 4px solid #e8c866;
     border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.6);
   }
   .reels { display: flex; gap: 4px; background: #300a14; padding: 4px; border-radius: 4px; position: relative; }
   .reel { width: var(--cell); height: calc(var(--cell) * 3); overflow: hidden; position: relative;
-          background: radial-gradient(circle, #7d1830 0%, #3d0918 100%); }
+          background: repeating-linear-gradient(90deg, #8e1236 0 3px, #7a0f2e 3px 6px); box-shadow: inset 0 0 30px rgba(0,0,0,.6); }
   .strip { position: absolute; left: 0; top: 0; width: 100%; will-change: transform; }
   .cell { width: var(--cell); height: var(--cell); display: flex; align-items: center; justify-content: center;
           flex-direction: column; position: relative; }
   .sym { font-size: calc(var(--cell) * .58); line-height: 1; filter: drop-shadow(0 3px 3px rgba(0,0,0,.6)); }
   .letter { font-size: calc(var(--cell) * .6); font-weight: 900; font-family: Georgia, serif;
             -webkit-text-stroke: 2px #3b0a00; text-shadow: 0 4px 0 #3b0a00; }
-  .L-A { color: #ff5a4a; } .L-K { color: #3ed36a; } .L-Q { color: #4aa8ff; } .L-J { color: #ffb13b; } .L-10 { color: #d77bff; font-size: calc(var(--cell) * .48); }
+  .letter { font-style: italic; transform: skewX(-6deg); }
+  .L-A { color: #ff3b3b; -webkit-text-stroke-color: #ffd36b; }
+  .L-K { color: #2fd3c0; -webkit-text-stroke-color: #0b4a45; }
+  .L-Q { color: #ff9a2e; -webkit-text-stroke-color: #fff0a0; }
+  .L-J { color: #c34bff; -webkit-text-stroke-color: #ffd36b; }
+  .L-9 { color: #3fd65a; -webkit-text-stroke-color: #0d4a18; }
+  .tile { width: 90%; height: 88%; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+          border: 3px solid #ffe08a; box-shadow: inset 0 0 18px rgba(0,0,0,.45), 0 3px 8px rgba(0,0,0,.6); }
+  .tile .sym { font-size: calc(var(--cell) * .6); }
+  .t-wild   { background: radial-gradient(circle, #ffe27a, #d8871a 70%); }
+  .t-lion   { background: radial-gradient(circle, #d58cff, #5a1a9a 75%); }
+  .t-bfly   { background: radial-gradient(circle, #ff8fb0, #b0123b 75%); border-radius: 50% 50% 45% 45%; }
+  .t-toad   { background: radial-gradient(circle, #9be36b, #2f7a1f 75%); }
+  .t-koi    { background: radial-gradient(circle, #6fb7ff, #1a3f9a 75%); }
+  .t-bonsai { background: radial-gradient(circle, #8fe8e0, #1f7a74 75%); }
+  .coin { background: radial-gradient(circle, #ff4a3a 0%, #a8100c 60%, transparent 62%); }
+  .coin .sym { border-radius: 50%; }
   .tag { position: absolute; bottom: 6%; font-size: calc(var(--cell) * .14); font-weight: 900;
          background: linear-gradient(#ffe68a,#c78b10); color: #4a1d00; padding: 0 6px; border-radius: 4px; }
   .coin .val { position: absolute; bottom: 8%; font-size: calc(var(--cell) * .15); font-weight: 900; color: var(--gold);
@@ -138,16 +157,17 @@
 
   // id, display, weight, pays[3,4,5] (multiplied by line bet)
   const SYMBOLS = [
-    { id: 'WILD',  html: '<span class="sym">🐉</span><span class="tag">WILD</span>', w: 3,  pay: [20, 80, 400] },
-    { id: 'TIGER', html: '<span class="sym">🐯</span>', w: 5,  pay: [10, 40, 200] },
-    { id: 'TURT',  html: '<span class="sym">🐢</span>', w: 6,  pay: [8, 30, 150] },
-    { id: 'TOAD',  html: '<span class="sym">🐸</span>', w: 7,  pay: [6, 20, 100] },
-    { id: 'KOI',   html: '<span class="sym">🐟</span>', w: 8,  pay: [5, 15, 75] },
-    { id: 'A',     html: '<span class="letter L-A">A</span>',   w: 11, pay: [3, 8, 30] },
-    { id: 'K',     html: '<span class="letter L-K">K</span>',   w: 11, pay: [3, 8, 30] },
-    { id: 'Q',     html: '<span class="letter L-Q">Q</span>',   w: 12, pay: [2, 5, 20] },
-    { id: 'J',     html: '<span class="letter L-J">J</span>',   w: 12, pay: [2, 5, 20] },
-    { id: '10',    html: '<span class="letter L-10">10</span>', w: 12, pay: [2, 5, 20] },
+    { id: 'WILD',  html: '<div class="tile t-wild"><span class="sym">🐉</span></div><span class="tag">WILD</span>', w: 3,  pay: [20, 80, 400] },
+    { id: 'LION',  html: '<div class="tile t-lion"><span class="sym">🦁</span></div>', w: 4,  pay: [12, 50, 250] },
+    { id: 'BFLY',  html: '<div class="tile t-bfly"><span class="sym">🦋</span></div>', w: 5,  pay: [10, 40, 200] },
+    { id: 'TOAD',  html: '<div class="tile t-toad"><span class="sym">🐸</span></div>', w: 6,  pay: [8, 30, 150] },
+    { id: 'KOI',   html: '<div class="tile t-koi"><span class="sym">🐟</span></div>', w: 7,  pay: [6, 20, 100] },
+    { id: 'BONSAI',html: '<div class="tile t-bonsai"><span class="sym">🌳</span></div>', w: 8,  pay: [5, 15, 75] },
+    { id: 'A',     html: '<span class="letter L-A">A</span>', w: 10, pay: [3, 8, 30] },
+    { id: 'K',     html: '<span class="letter L-K">K</span>', w: 10, pay: [3, 8, 30] },
+    { id: 'Q',     html: '<span class="letter L-Q">Q</span>', w: 11, pay: [2, 5, 20] },
+    { id: 'J',     html: '<span class="letter L-J">J</span>', w: 11, pay: [2, 5, 20] },
+    { id: '9',     html: '<span class="letter L-9">9</span>', w: 11, pay: [2, 5, 20] },
     { id: 'SCAT',  html: '<span class="sym">🏮</span><span class="tag">BONUS</span>', w: 3, pay: null },
     { id: 'COIN',  html: null, w: 5, pay: null },
   ];
