@@ -65,6 +65,9 @@
   .t-bonsai { background: radial-gradient(circle, #8fe8e0, #1f7a74 75%); }
   .coin { background: radial-gradient(circle, #ff4a3a 0%, #a8100c 60%, transparent 62%); }
   .coin .sym { border-radius: 50%; }
+  .pic { width: 94%; height: 94%; object-fit: contain; filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); }
+  .coin:has(.pic) { background: none; }
+  .paytable .pic { width: 34px; height: 34px; vertical-align: middle; }
   .tag { position: absolute; bottom: 6%; font-size: calc(var(--cell) * .14); font-weight: 900;
          background: linear-gradient(#ffe68a,#c78b10); color: #4a1d00; padding: 0 6px; border-radius: 4px; }
   .coin .val { position: absolute; bottom: 8%; font-size: calc(var(--cell) * .15); font-weight: 900; color: var(--gold);
@@ -172,6 +175,31 @@
     { id: 'COIN',  html: null, w: 5, pay: null },
   ];
   const SYM = Object.fromEntries(SYMBOLS.map(s => [s.id, s]));
+
+  // Optional custom artwork: drop PNGs into images/ with these names.
+  // Any file that is missing falls back to the built-in emoji look.
+  const IMAGE_FILES = {
+    WILD: 'wild', LION: 'lion', BFLY: 'butterfly', TOAD: 'toad', KOI: 'koi', BONSAI: 'bonsai',
+    A: 'a', K: 'k', Q: 'q', J: 'j', 9: '9', SCAT: 'bonus', COIN: 'coin',
+  };
+  const TAGS = { WILD: 'WILD', SCAT: 'BONUS' };
+  const loadedImages = {};
+  function loadImage(src) {
+    return new Promise(res => { const im = new Image(); im.onload = () => res(true); im.onerror = () => res(false); im.src = src; });
+  }
+  async function loadCustomArt() {
+    await Promise.all(Object.entries(IMAGE_FILES).map(async ([id, name]) => {
+      const src = `images/${name}.png`;
+      if (await loadImage(src)) loadedImages[id] = src;
+    }));
+    for (const [id, src] of Object.entries(loadedImages)) {
+      if (id === 'COIN') continue;
+      SYM[id].html = `<img class="pic" src="${src}" alt="${id}">` + (TAGS[id] ? `<span class="tag">${TAGS[id]}</span>` : '');
+    }
+    if (await loadImage('images/background.png')) {
+      document.body.style.background = "url('images/background.png') center / cover fixed, #0a3a14";
+    }
+  }
   const TOTAL_W = SYMBOLS.reduce((a, s) => a + s.w, 0);
 
   // 20 paylines, each entry = row index per column
@@ -223,7 +251,8 @@
   function cellHTML(s) {
     if (s.id === 'COIN') {
       const label = s.jp ? s.jp : fmt(coinValue(s));
-      return `<span class="sym">💰</span><span class="val">${label}</span>`;
+      const art = loadedImages.COIN ? `<img class="pic" src="${loadedImages.COIN}" alt="COIN">` : '<span class="sym">💰</span>';
+      return `${art}<span class="val">${label}</span>`;
     }
     return SYM[s.id].html;
   }
@@ -461,6 +490,11 @@
   window.addEventListener('resize', () => { for (let c = 0; c < COLS; c++) renderStrip(c, grid[c]); });
 
   buildReels(); buildPaytable(); updateUI();
+  loadCustomArt().then(() => {
+    if (!Object.keys(loadedImages).length) return;
+    if (!spinning) for (let c = 0; c < COLS; c++) renderStrip(c, grid[c]);
+    buildPaytable();
+  });
 })();
 </script>
 </body>
