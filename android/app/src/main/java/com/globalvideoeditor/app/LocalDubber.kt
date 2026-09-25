@@ -318,6 +318,18 @@ object LocalDubber {
                         val detail = e.cause?.message?.let { " ($it)" }.orEmpty()
                         throw PipelineException("${strings.getValue("err_ytdl_init_prefix")}${e.message}$detail")
                     }
+                    try {
+                        // TikTok/YouTube regularly change their site in ways that break
+                        // extraction until yt-dlp ships a fix; the binary bundled in the
+                        // app's APK is fixed at build time and goes stale within weeks.
+                        // Fetching the latest release here keeps extraction working
+                        // without needing a new app build. Best-effort: if it fails
+                        // (offline, GitHub API rate limit), fall back to the bundled
+                        // binary rather than blocking the download entirely.
+                        YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
+                    } catch (e: Exception) {
+                        // ignore -- proceed with whatever binary is already installed
+                    }
                 }
             }
         }
