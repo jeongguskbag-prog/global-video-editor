@@ -1,0 +1,35 @@
+{
+  "broker": "kis",
+  "env": "demo",
+  "symbols": ["005930", "000660", "035420"],
+  "order_type": "market",
+  "poll_seconds": 30,
+  "order_cooldown_seconds": 90,
+  "paper_cash": 10000000,
+  "paper_data": "synthetic",
+  "history_file": "trade_history.jsonl",
+  "holidays": ["20261009", "20261225"],
+  "strategy": {
+    "name": "ma_rsi",
+    "params": {"short": 9, "long": 21, "rsi_period": 14, "rsi_entry_max": 60, "rsi_exit": 75},
+    "interval": "5m",
+    "candles": 60,
+    "trend_filter_period": 60
+  },
+  "risk": {
+    "budget_per_trade": 1000000,
+    "risk_per_trade_pct": null,
+    "stop_loss_pct": 3.0,
+    "take_profit_pct": 6.0,
+    "trailing_stop_pct": null,
+    "average_down_pct": null,
+    "daily_loss_limit_pct": 5.0,
+    "max_consecutive_losses": 3,
+    "cooldown_hours": 24,
+    "max_spread_pct": 0.5,
+    "max_positions": 5,
+    "fee_rate": 0.00015,
+    "tax_rate": 0.002,
+    "exit_minutes_before_close": null
+  }
+}

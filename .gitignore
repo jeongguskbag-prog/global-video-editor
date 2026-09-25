@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+config.json
+paper_state.json
+trade_history.jsonl
