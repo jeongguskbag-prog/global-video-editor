@@ -6,8 +6,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.yausername.youtubedl_android.YoutubeDL
@@ -16,7 +14,6 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import dev.ffmpegkit.whisper.Whisper
 import dev.ffmpegkit.whisper.WhisperConfig
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,16 +23,14 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
-import java.util.UUID
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /**
- * Fully on-device pipeline: audio extraction + subtitle burn-in / mixing via ffmpeg-kit,
+ * Mostly on-device pipeline: audio extraction + subtitle burn-in / mixing via ffmpeg-kit,
  * speech recognition via whisper-android (ggml-base.bin, downloaded once), translation via
- * Google's free text endpoint, and dubbing voice via Android's built-in TextToSpeech engine.
- * Only the license check touches the network server; everything else runs on the phone.
+ * Google's free text endpoint, and dubbing voice via the same cloud edge-tts engine the PC
+ * app uses (see EdgeTts.kt) for consistent, natural-sounding voices across platforms.
+ * Only the license check and TTS synthesis touch the network; the rest runs on the phone.
  */
 object LocalDubber {
 
@@ -126,7 +121,7 @@ object LocalDubber {
         if (wantDubbing) {
             log(strings.getValue("log_tts"))
             val dubTrackFile = File(workDir, "dub_track.wav")
-            synthesizeSegmentsToTrack(context, segments, langCode, workDir, dubTrackFile, strings, log)
+            synthesizeSegmentsToTrack(segments, langCode, genderCode, workDir, dubTrackFile, strings, log)
 
             log(strings.getValue("log_mixing"))
             val dubbedFile = File(workDir, "dubbed.mp4")
@@ -433,37 +428,26 @@ object LocalDubber {
         return String.format(Locale.US, "%02d:%02d:%02d,%03d", h, m, s, msRemainder)
     }
 
-    private fun localeFor(langCode: String): Locale = when (langCode) {
-        "ko" -> Locale.KOREAN
-        "en" -> Locale.US
-        "zh" -> Locale.SIMPLIFIED_CHINESE
-        "es" -> Locale("es", "ES")
-        "ja" -> Locale.JAPANESE
-        "de" -> Locale.GERMAN
-        "fr" -> Locale.FRENCH
-        "vi" -> Locale("vi", "VN")
-        else -> Locale.US
-    }
-
     /**
-     * Synthesizes each segment's translated text as its own clip (rather than one long
-     * blob) at the TTS engine's natural, standard rate, and places each clip at its
-     * original timestamp or right after the previous clip ends, whichever is later, so
-     * clips never overlap. A single continuous TTS read has no natural pauses between
-     * sentences (sounds rushed) and often finishes well before the video ends, leaving
-     * the tail playing only the quieted original-language audio; per-segment placement
-     * fixes both without altering speech rate.
+     * Synthesizes each segment's translated text as its own clip via the cloud edge-tts
+     * engine (see EdgeTts.kt) -- the same engine the PC app uses -- rather than one long
+     * blob, and places each clip at its original timestamp or right after the previous
+     * clip ends, whichever is later, so clips never overlap. A single continuous TTS
+     * read has no natural pauses between sentences (sounds rushed) and often finishes
+     * well before the video ends, leaving the tail playing only the quieted
+     * original-language audio; per-segment placement fixes both without altering
+     * speech rate.
      */
     private suspend fun synthesizeSegmentsToTrack(
-        context: Context,
         segments: List<Segment>,
         langCode: String,
+        genderCode: String,
         workDir: File,
         outFile: File,
         strings: Map<String, String>,
         log: (String) -> Unit
     ) {
-        val locale = localeFor(langCode)
+        val voiceName = EdgeTts.voiceFor(langCode, genderCode)
         val segDir = File(workDir, "tts_segments").apply { mkdirs() }
         val clips = mutableListOf<Pair<Long, File>>() // placementMs, clip file
         // Every clip plays at the TTS engine's natural (standard) rate -- never sped up
@@ -476,29 +460,26 @@ object LocalDubber {
         // cost of drifting slightly out of sync with the video over a long run.
         var cursorMs = 0L
 
-        val tts = createTts(context, strings)
-        try {
-            val result = tts.setLanguage(locale)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                throw PipelineException(strings.getValue("err_tts_lang"))
-            }
-            for ((idx, seg) in segments.withIndex()) {
-                val text = seg.translated.trim()
-                if (text.isEmpty()) continue
+        for ((idx, seg) in segments.withIndex()) {
+            val text = seg.translated.trim()
+            if (text.isEmpty()) continue
 
-                log("${strings.getValue("log_tts")} (${idx + 1}/${segments.size})")
-                val rawFile = File(segDir, "seg_${idx}_raw.wav")
-                synthesizeUtterance(tts, text, rawFile, strings)
-                if (!rawFile.exists() || rawFile.length() < 200) continue
-
-                val actualMs = (withContext(Dispatchers.IO) { probeDurationSeconds(rawFile) } * 1000).toLong()
-                val placementMs = maxOf(seg.startMs, cursorMs)
-                clips.add(placementMs to rawFile)
-                cursorMs = placementMs + actualMs + INTER_SEGMENT_GAP_MS
+            log("${strings.getValue("log_tts")} (${idx + 1}/${segments.size})")
+            val rawFile = File(segDir, "seg_${idx}_raw.mp3")
+            try {
+                EdgeTts.synthesize(text, voiceName, rawFile)
+            } catch (e: Exception) {
+                // A single dropped connection shouldn't fail the whole dub; skip this
+                // segment and keep going (its original-language audio stays audible
+                // underneath, quieted, rather than the video losing this sentence).
+                continue
             }
-        } finally {
-            tts.stop()
-            tts.shutdown()
+            if (!rawFile.exists() || rawFile.length() < 200) continue
+
+            val actualMs = (withContext(Dispatchers.IO) { probeDurationSeconds(rawFile) } * 1000).toLong()
+            val placementMs = maxOf(seg.startMs, cursorMs)
+            clips.add(placementMs to rawFile)
+            cursorMs = placementMs + actualMs + INTER_SEGMENT_GAP_MS
         }
 
         if (clips.isEmpty()) {
@@ -517,45 +498,4 @@ object LocalDubber {
         delayGraph.append("${mixLabels}amix=inputs=${clips.size}:duration=longest:dropout_transition=0:normalize=0[aout]")
         runFfmpeg("-y $inputArgs-filter_complex \"$delayGraph\" -map \"[aout]\" \"${outFile.absolutePath}\"")
     }
-
-    private suspend fun synthesizeUtterance(
-        tts: TextToSpeech,
-        text: String,
-        outFile: File,
-        strings: Map<String, String>
-    ) {
-        val utteranceId = UUID.randomUUID().toString()
-        suspendCancellableCoroutine<Unit> { cont ->
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) {
-                    if (cont.isActive) cont.resume(Unit)
-                }
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) {
-                    if (cont.isActive) cont.resumeWithException(PipelineException(strings.getValue("err_tts_synth")))
-                }
-                override fun onError(utteranceId: String?, errorCode: Int) {
-                    if (cont.isActive) cont.resumeWithException(PipelineException("${strings.getValue("err_tts_synth")} (code $errorCode)"))
-                }
-            })
-            val params = android.os.Bundle()
-            val res = tts.synthesizeToFile(text, params, outFile, utteranceId)
-            if (res != TextToSpeech.SUCCESS && cont.isActive) {
-                cont.resumeWithException(PipelineException(strings.getValue("err_tts_request")))
-            }
-        }
-    }
-
-    private suspend fun createTts(context: Context, strings: Map<String, String>): TextToSpeech =
-        suspendCancellableCoroutine { cont ->
-            var ttsRef: TextToSpeech? = null
-            ttsRef = TextToSpeech(context) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    cont.resume(ttsRef!!)
-                } else {
-                    cont.resumeWithException(PipelineException(strings.getValue("err_tts_init")))
-                }
-            }
-        }
 }
