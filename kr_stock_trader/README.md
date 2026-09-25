@@ -5,7 +5,7 @@
 
 | 코인 앱 | 이 패키지 |
 |---|---|
-| Binance / Bybit / OKX / Bitget / Gate 클라이언트 | **한국투자증권(KIS) Open API**, **키움 REST API**, 로컬 모의(paper) |
+| Binance / Bybit / OKX / Bitget / Gate 클라이언트 | **한국투자증권(KIS)**, **키움**, **LS증권**, **DB증권** Open API, 로컬 모의(paper) |
 | MA Crossover(9/21), RSI 과매수/과매도, MA+RSI 결합 | 동일 (`ma_cross`, `rsi`, `ma_rsi`) |
 | 손절/익절, 1회 위험 % 기반 수량, 물타기 1회, 일일 손실 한도, 연속 손실 쿨다운, 스프레드 필터, 1h EMA200 추세 필터 | 동일 (추세 필터는 일봉 N일 이동평균) |
 | 텔레그램 알림, 거래 기록/승률 | 동일 |
@@ -22,6 +22,26 @@
 ```bash
 pip install -r kr_stock_trader/requirements.txt
 ```
+
+## 지원 증권사
+
+| 설정값 `broker` | 증권사 | 필요한 환경변수 | 모의투자 |
+|---|---|---|---|
+| `kis` | 한국투자증권 | `KIS_APP_KEY`, `KIS_APP_SECRET`, `KIS_ACCOUNT` | 별도 서버 (`env: demo`) |
+| `kiwoom` | 키움증권 (REST) | `KIWOOM_APP_KEY`, `KIWOOM_SECRET_KEY` | 별도 서버 (`env: demo`) |
+| `ls` | LS증권 (구 이베스트) | `LS_APP_KEY`, `LS_APP_SECRET` | 같은 서버, **모의투자용 App Key** 사용 |
+| `db` | DB증권 (구 DB금융투자) | `DB_APP_KEY`, `DB_APP_SECRET` | 같은 서버, **모의투자용 App Key** 사용 |
+| `paper` | 로컬 모의 | 없음 | 항상 모의 |
+
+LS·DB는 실전/모의 주소가 같고 발급받은 키 종류로 구분됩니다. `env` 값은 이 프로그램의 실전 주문 안전장치(`--live`)에만 쓰이므로,
+모의투자 키를 넣었다면 `env: demo`, 실전 키를 넣었다면 `env: real` 로 맞춰 주세요.
+
+### 연결하지 못하는 증권사
+
+| 증권사 | 이유 |
+|---|---|
+| 미래에셋, 삼성, NH투자(나무), KB, 신한, 토스, 카카오페이 등 | 개인에게 공개된 REST 주문 API가 없음 (앱·HTS 전용) |
+| 대신증권 (CYBOS Plus), NH (QV Open API), 신한 (indi) | Windows 전용 COM/OCX 방식이라 HTS를 켜 둔 32비트 Windows PC에서만 동작. 이 패키지(REST 기반)와 구조가 달라 미포함 |
 
 ## 1) 계좌 없이 바로 체험 (가상 시세)
 
@@ -49,7 +69,8 @@ python -m kr_stock_trader history
    python -m kr_stock_trader -c config.json run                        # 자동매매
    ```
 
-키움 REST API를 쓰려면 `"broker": "kiwoom"` 으로 바꾸고 `KIWOOM_APP_KEY`, `KIWOOM_SECRET_KEY` 를 설정합니다.
+다른 증권사는 `"broker"` 값을 `kiwoom` / `ls` / `db` 로 바꾸고 위 표의 환경변수를 설정하면 됩니다.
+명령줄에서 `--broker ls` 처럼 일시적으로 바꿀 수도 있습니다.
 실제 시세로 로컬 모의매매만 하려면 `"broker": "paper", "paper_data": "kis"` 로 두면
 시세는 KIS에서 받고 주문은 로컬에서만 체결됩니다.
 
@@ -87,6 +108,8 @@ python -m kr_stock_trader -c config.json --env real run --live
 kr_stock_trader/
   brokers/kis.py      한국투자증권 Open API (토큰 캐시, 시세/호가/일봉/분봉, 잔고, 현금주문)
   brokers/kiwoom.py   키움 REST API (ka10001/ka10004/ka10080/ka10081, kt00001/kt00018, kt10000/kt10001)
+  brokers/ls.py       LS증권 Open API (t1101/t8410/t8412, t0424/CSPAQ12200, CSPAT00601)
+  brokers/db.py       DB증권 Open API (현재가/일·분차트, 잔고/예수금, 주식종합주문)
   brokers/paper.py    로컬 모의 브로커 + 가상 시세
   strategies.py       MA 크로스 / RSI / MA+RSI
   risk.py             수량 계산, 청산 조건, 진입 차단 조건
@@ -103,5 +126,5 @@ kr_stock_trader/
 
 - 투자 손실에 대한 책임은 사용자에게 있습니다. 이 코드는 수익을 보장하지 않습니다.
 - 매도 손익은 주문 시점 호가로 추정한 값이며 실제 체결가와 다를 수 있습니다.
-- 증권사 API는 초당 호출 수 제한이 있습니다(KIS 모의 약 2건/초). 감시 종목이 많으면 `poll_seconds` 를 늘리세요.
-- KIS 토큰은 `~/.kr_stock_trader/` 에 캐시됩니다(발급 1분 1회 제한). API 키는 절대 커밋하지 마세요.
+- 증권사 API는 초당 호출 수 제한이 있습니다(KIS 모의 약 2건/초, LS 차트 1건/초, DB 예수금 1건/초). 감시 종목이 많으면 `poll_seconds` 를 늘리세요.
+- 모든 증권사 접근 토큰은 `~/.kr_stock_trader/` 에 캐시됩니다(KIS는 발급 1분 1회 제한). API 키는 절대 커밋하지 마세요.

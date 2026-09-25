@@ -14,7 +14,7 @@ import time
 from datetime import timedelta
 
 from .backtest import run_backtest
-from .brokers import Broker, BrokerError, KisBroker, KiwoomBroker, PaperBroker
+from .brokers import Broker, BrokerError, DbBroker, KisBroker, KiwoomBroker, LsBroker, PaperBroker
 from .config import AppConfig, env
 from .engine import AutoTradeEngine
 from .history import TradeHistoryStore
@@ -24,17 +24,24 @@ from .notifier import TelegramNotifier
 from .strategies import STRATEGIES, build_strategy
 
 
+BROKERS = ["paper", "kis", "kiwoom", "ls", "db"]
+
+
 def make_broker(name: str, cfg: AppConfig) -> Broker:
     if name == "kis":
         return KisBroker(env("KIS_APP_KEY"), env("KIS_APP_SECRET"), env("KIS_ACCOUNT"), cfg.env)
     if name == "kiwoom":
         return KiwoomBroker(env("KIWOOM_APP_KEY"), env("KIWOOM_SECRET_KEY"), cfg.env)
+    if name == "ls":
+        return LsBroker(env("LS_APP_KEY"), env("LS_APP_SECRET"), cfg.env)
+    if name == "db":
+        return DbBroker(env("DB_APP_KEY"), env("DB_APP_SECRET"), cfg.env)
     if name == "paper":
         source = None if cfg.paper_data == "synthetic" else make_broker(cfg.paper_data, cfg)
         return PaperBroker(cfg.paper_cash, cfg.risk.fee_rate, cfg.risk.tax_rate, data_source=source,
                            state_file=env("PAPER_STATE_FILE", "paper_state.json"),
                            quote_interval=cfg.strategy.interval)
-    raise ValueError(f"알 수 없는 브로커: {name} (paper | kis | kiwoom)")
+    raise ValueError(f"알 수 없는 브로커: {name} ({' | '.join(BROKERS)})")
 
 
 def _guard_live(broker: Broker, args) -> None:
@@ -136,7 +143,7 @@ def cmd_init_config(broker, cfg, args):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="kr_stock_trader", description="국내 주식(KRX) 자동매매 터미널")
     p.add_argument("--config", "-c", help="설정 JSON 경로")
-    p.add_argument("--broker", choices=["paper", "kis", "kiwoom"], help="설정의 broker 덮어쓰기")
+    p.add_argument("--broker", choices=BROKERS, help="설정의 broker 덮어쓰기")
     p.add_argument("--env", choices=["demo", "real"], help="설정의 env 덮어쓰기")
     p.add_argument("--verbose", "-v", action="store_true")
     sub = p.add_subparsers(dest="command", required=True)

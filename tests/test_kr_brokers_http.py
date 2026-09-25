@@ -7,7 +7,9 @@ import pytest
 from kr_stock_trader.brokers import _token_cache
 from kr_stock_trader.brokers.base import BrokerError
 from kr_stock_trader.brokers.kis import KisBroker
+from kr_stock_trader.brokers.db import DbBroker
 from kr_stock_trader.brokers.kiwoom import KiwoomBroker
+from kr_stock_trader.brokers.ls import LsBroker
 from kr_stock_trader.models import OrderType, Side
 
 
@@ -28,14 +30,15 @@ class FakeSession:
 
     def _respond(self, url, headers, payload):
         self.calls.append({"url": url, "headers": headers or {}, "payload": payload})
-        key_id = (headers or {}).get("tr_id") or (headers or {}).get("api-id")
+        h = headers or {}
+        key_id = h.get("tr_id") or h.get("api-id") or h.get("tr_cd")
         for (suffix, rid), responses in self.routes.items():
             if url.endswith(suffix) and (rid is None or rid == key_id):
                 return responses.pop(0) if len(responses) > 1 else responses[0]
         raise AssertionError(f"예상하지 못한 요청: {url} {key_id}")
 
-    def post(self, url, json=None, headers=None, timeout=None):
-        return self._respond(url, headers, json)
+    def post(self, url, json=None, headers=None, timeout=None, data=None):
+        return self._respond(url, headers, json if json is not None else data)
 
     def request(self, method, url, headers=None, params=None, json=None, timeout=None):
         return self._respond(url, headers, params if method == "GET" else json)
@@ -204,3 +207,103 @@ def test_kis_minute_candles_incremental(monkeypatch):
 
     five = broker.get_candles("005930", "5m", 100)
     assert five[0].time.minute == 0 and five[0].close == 104 and five[-1].close == 141
+
+
+def ls(routes):
+    routes = {("/oauth2/token", None): [FakeResponse({"access_token": "L", "expires_in": 86400})], **routes}
+    session = FakeSession(routes)
+    return LsBroker("key", "secret", "demo", session=session, rate_interval=0, chart_interval=0), session
+
+
+def test_ls_token_is_form_encoded_and_order_body():
+    broker, session = ls({("/stock/order", "CSPAT00601"): [FakeResponse({
+        "rsp_cd": "00040", "rsp_msg": "매수주문이 완료되었습니다.", "CSPAT00601OutBlock2": {"OrdNo": 12345}})]})
+    r = broker.place_order("005930", Side.BUY, 3, OrderType.LIMIT, 70_100)
+    assert r.ok and r.order_id == "12345"
+    token_call = session.calls[0]
+    assert token_call["payload"]["appsecretkey"] == "secret" and token_call["payload"]["scope"] == "oob"
+    body = session.calls[-1]["payload"]["CSPAT00601InBlock1"]
+    assert body["IsuNo"] == "A005930" and body["OrdQty"] == 3 and body["OrdPrc"] == 70_100
+    assert body["BnsTpCode"] == "2" and body["OrdprcPtnCode"] == "00"
+    assert session.calls[-1]["headers"]["authorization"] == "Bearer L"
+
+
+def test_ls_error_code_and_market_sell():
+    broker, session = ls({("/stock/order", "CSPAT00601"): [
+        FakeResponse({"rsp_cd": "01234", "rsp_msg": "주문가능수량이 부족합니다"}),
+        FakeResponse({"rsp_cd": "00039", "rsp_msg": "매도주문 완료", "CSPAT00601OutBlock2": {"OrdNo": 7}}),
+    ]})
+    bad = broker.place_order("005930", Side.SELL, 1)
+    assert not bad.ok and "부족" in bad.message
+    good = broker.place_order("005930", Side.SELL, 1)
+    assert good.ok
+    body = session.calls[-1]["payload"]["CSPAT00601InBlock1"]
+    assert body["BnsTpCode"] == "1" and body["OrdprcPtnCode"] == "03" and body["OrdPrc"] == 0
+
+
+def test_ls_quote_balance_and_candles():
+    broker, _ = ls({
+        ("/stock/market-data", "t1101"): [FakeResponse({"rsp_cd": "00000", "t1101OutBlock": {
+            "price": 70100, "bidho1": 70100, "offerho1": 70200}})],
+        ("/stock/accno", "CSPAQ12200"): [FakeResponse({"rsp_cd": "00136", "CSPAQ12200OutBlock2": {"MnyOrdAbleAmt": 500000}})],
+        ("/stock/accno", "t0424"): [FakeResponse({"rsp_cd": "00000",
+            "t0424OutBlock": {"sunamt": 1201000, "cts_expcode": ""},
+            "t0424OutBlock1": [{"expcode": "005930", "hname": "삼성전자", "janqty": 10, "pamt": 68000, "price": 70100}]})],
+        ("/stock/chart", "t8412"): [FakeResponse({"rsp_cd": "00000", "t8412OutBlock": {"cts_date": ""},
+            "t8412OutBlock1": [
+                {"date": "20260925", "time": "090000", "open": 69800, "high": 70100, "low": 69700, "close": 70000, "jdiff_vol": 50},
+                {"date": "20260925", "time": "090500", "open": 70000, "high": 70300, "low": 69900, "close": 70200, "jdiff_vol": 100},
+            ]})],
+    })
+    q = broker.get_quote("005930")
+    assert (q.price, q.bid, q.ask) == (70_100, 70_100, 70_200)
+    b = broker.get_balance()
+    assert b.cash == 500_000 and b.total_eval == 1_201_000 and b.positions[0].qty == 10
+    candles = broker.get_candles("005930", "5m", 2)
+    assert [c.close for c in candles] == [70_000, 70_200] and candles[1].time.minute == 5
+
+
+def db(routes):
+    routes = {("/oauth2/token", None): [FakeResponse({"access_token": "D", "expires_in": 86400})], **routes}
+    session = FakeSession(routes)
+    return DbBroker("key", "secret", "demo", session=session, rate_interval=0), session
+
+
+def test_db_order_body_and_result():
+    broker, session = db({("/api/v1/trading/kr-stock/order", None): [FakeResponse({
+        "rsp_cd": "00000", "rsp_msg": "정상", "Out": {"OrdNo": 3021, "IsuNm": "삼성전자"}})]})
+    r = broker.place_order("005930", Side.SELL, 2)
+    assert r.ok and r.order_id == "3021"
+    body = session.calls[-1]["payload"]["In"]
+    assert body == {"IsuNo": "A005930", "OrdQty": 2, "OrdPrc": 0, "BnsTpCode": "1", "OrdprcPtnCode": "03",
+                    "MgntrnCode": "000", "LoanDt": "00000000", "OrdCndiTpCode": "0", "TrchNo": 1}
+
+
+def test_db_token_retry_and_error():
+    broker, session = db({("/api/v1/quote/kr-stock/inquiry/price", None): [
+        FakeResponse({"rsp_cd": "IGW00123", "rsp_msg": "기간이 만료된 token 입니다."}),
+        FakeResponse({"rsp_cd": "00000", "Out": {"Prpr": "70100", "Bidp1": "70100", "Askp1": "70200"}}),
+    ]})
+    q = broker.get_quote("005930")
+    assert q.price == 70_100 and q.ask == 70_200
+    assert sum(c["url"].endswith("/oauth2/token") for c in session.calls) == 2
+
+    broker2, _ = db({("/api/v1/trading/kr-stock/order", None): [FakeResponse(
+        {"rsp_cd": "IGW00201", "rsp_msg": "호출 거래건수를 초과하였습니다."})]})
+    assert not broker2.place_order("005930", Side.BUY, 1).ok
+
+
+def test_db_balance_and_candles():
+    broker, _ = db({
+        ("/inquiry/acnt-deposit", None): [FakeResponse({"rsp_cd": "00000", "Out1": {"PrsmptDpsD2": 800000, "DpsBalAmt": 900000}})],
+        ("/inquiry/balance", None): [FakeResponse({"rsp_cd": "00000", "Out": {"DpsastAmt": 1500000},
+            "Out1": [{"IsuNo": "A005930", "IsuNm": "삼성전자", "BalQty0": 10, "ExecPrc": 68000, "NowPrc": 70100},
+                     {"IsuNo": "A000660", "IsuNm": "SK하이닉스", "BalQty0": 0}]})],
+        ("/kr-chart/day", None): [FakeResponse({"rsp_cd": "00000", "Out": [
+            {"Date": "20260925", "Oprc": "3", "Hprc": "4", "Lprc": "2", "Prpr": "3", "CntgVol": "1"},
+            {"Date": "20260924", "Oprc": "2", "Hprc": "3", "Lprc": "1", "Prpr": "2", "CntgVol": "1"}]})],
+    })
+    b = broker.get_balance()
+    assert b.cash == 800_000 and b.total_eval == 1_500_000
+    assert [(p.symbol, p.qty, p.avg_price) for p in b.positions] == [("005930", 10, 68_000)]
+    assert [c.close for c in broker.get_candles("005930", "D", 5)] == [2, 3]
