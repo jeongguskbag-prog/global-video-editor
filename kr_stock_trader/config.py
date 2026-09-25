@@ -44,14 +44,14 @@ class StrategyConfig:
 
 @dataclass
 class AppConfig:
-    broker: str = "paper"                 # paper | kis | kiwoom | ls | db
+    broker: str = "paper"                 # paper | kis | kiwoom | ls | db | daishin(Windows)
     env: str = "demo"                     # demo(모의투자) | real(실전)
     symbols: List[str] = field(default_factory=lambda: ["005930", "000660"])
     order_type: str = "market"            # market | limit (limit 은 1호가에 맞춘 지정가)
     poll_seconds: int = 30
     order_cooldown_seconds: int = 90      # 주문 직후 같은 종목 재주문 방지
     paper_cash: float = 10_000_000        # paper 브로커 시작 현금
-    paper_data: str = "synthetic"         # paper 시세 출처: synthetic | kis | kiwoom | ls | db
+    paper_data: str = "synthetic"         # paper 시세 출처: synthetic | kis | kiwoom | ls | db | daishin
     history_file: str = "trade_history.jsonl"
     holidays: List[str] = field(default_factory=list)  # 휴장일 YYYYMMDD
     strategy: StrategyConfig = field(default_factory=StrategyConfig)

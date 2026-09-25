@@ -14,7 +14,7 @@ import time
 from datetime import timedelta
 
 from .backtest import run_backtest
-from .brokers import Broker, BrokerError, DbBroker, KisBroker, KiwoomBroker, LsBroker, PaperBroker
+from .brokers import Broker, BrokerError, DaishinBroker, DbBroker, KisBroker, KiwoomBroker, LsBroker, PaperBroker
 from .config import AppConfig, env
 from .engine import AutoTradeEngine
 from .history import TradeHistoryStore
@@ -24,7 +24,7 @@ from .notifier import TelegramNotifier
 from .strategies import STRATEGIES, build_strategy
 
 
-BROKERS = ["paper", "kis", "kiwoom", "ls", "db"]
+BROKERS = ["paper", "kis", "kiwoom", "ls", "db", "daishin"]
 
 
 def make_broker(name: str, cfg: AppConfig) -> Broker:
@@ -36,6 +36,8 @@ def make_broker(name: str, cfg: AppConfig) -> Broker:
         return LsBroker(env("LS_APP_KEY"), env("LS_APP_SECRET"), cfg.env)
     if name == "db":
         return DbBroker(env("DB_APP_KEY"), env("DB_APP_SECRET"), cfg.env)
+    if name == "daishin":
+        return DaishinBroker(env("DAISHIN_ACCOUNT"), cfg.env)
     if name == "paper":
         source = None if cfg.paper_data == "synthetic" else make_broker(cfg.paper_data, cfg)
         return PaperBroker(cfg.paper_cash, cfg.risk.fee_rate, cfg.risk.tax_rate, data_source=source,

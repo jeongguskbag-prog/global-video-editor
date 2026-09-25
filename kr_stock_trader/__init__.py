@@ -3,7 +3,7 @@
 global-crypto-terminal 앱(바이낸스·바이비트 등 코인 선물 자동매매)의 구조를
 국내 주식 현금 계좌에 맞게 옮긴 패키지다.
 
-- brokers/   : 한국투자증권(KIS), 키움, LS증권, DB증권 Open API, 로컬 모의 브로커
+- brokers/   : 한국투자증권(KIS), 키움, LS증권, DB증권 Open API, 대신증권 CYBOS Plus(Windows), 로컬 모의 브로커
 - strategies : MA 크로스(9/21), RSI 과매수/과매도, MA+RSI 결합
 - risk       : 손절/익절/트레일링, 1회 위험 % 기반 수량 계산, 일일 손실 한도,
                연속 손실 쿨다운, 호가 스프레드 필터

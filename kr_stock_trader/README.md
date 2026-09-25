@@ -31,6 +31,7 @@ pip install -r kr_stock_trader/requirements.txt
 | `kiwoom` | 키움증권 (REST) | `KIWOOM_APP_KEY`, `KIWOOM_SECRET_KEY` | 별도 서버 (`env: demo`) |
 | `ls` | LS증권 (구 이베스트) | `LS_APP_KEY`, `LS_APP_SECRET` | 같은 서버, **모의투자용 App Key** 사용 |
 | `db` | DB증권 (구 DB금융투자) | `DB_APP_KEY`, `DB_APP_SECRET` | 같은 서버, **모의투자용 App Key** 사용 |
+| `daishin` | 대신증권 CYBOS Plus (**Windows 전용**) | 없음 (`DAISHIN_ACCOUNT` 는 선택) | CYBOS Plus 로그인 시 '모의투자 접속' |
 | `paper` | 로컬 모의 | 없음 | 항상 모의 |
 
 LS·DB는 실전/모의 주소가 같고 발급받은 키 종류로 구분됩니다. `env` 값은 이 프로그램의 실전 주문 안전장치(`--live`)에만 쓰이므로,
@@ -41,7 +42,31 @@ LS·DB는 실전/모의 주소가 같고 발급받은 키 종류로 구분됩니
 | 증권사 | 이유 |
 |---|---|
 | 미래에셋, 삼성, NH투자(나무), KB, 신한, 토스, 카카오페이 등 | 개인에게 공개된 REST 주문 API가 없음 (앱·HTS 전용) |
-| 대신증권 (CYBOS Plus), NH (QV Open API), 신한 (indi) | Windows 전용 COM/OCX 방식이라 HTS를 켜 둔 32비트 Windows PC에서만 동작. 이 패키지(REST 기반)와 구조가 달라 미포함 |
+| NH (QV Open API), 신한 (indi) | Windows 전용 OCX 방식. 대신증권처럼 Windows 모듈로 추가 가능하지만 아직 미포함 |
+
+## 대신증권 (Windows)
+
+대신증권은 REST API 가 없고 CYBOS Plus 프로그램이 제공하는 COM 객체로 거래합니다.
+
+준비물
+1. 대신증권 계좌 + [CYBOS Plus 서비스 신청](https://money2.daishin.com) (모의투자는 모의투자 신청)
+2. **32비트** Python 3 (python.org 에서 "Windows installer (32-bit)") — CYBOS Plus 가 32비트 전용
+3. CYBOS Plus 실행 → 로그인 (모의투자는 로그인 창에서 '모의투자 접속'), 계좌 비밀번호 저장
+
+실행
+- `kr_stock_trader\windows\run_daishin.bat` 을 **마우스 오른쪽 → 관리자 권한으로 실행** 하면
+  pywin32 설치, 설정 파일 생성 후 메뉴(잔고/현재가/자동매매/거래기록)가 나옵니다.
+- 직접 실행하려면 관리자 권한 명령 프롬프트에서
+  ```bat
+  py -3-32 -m pip install -r kr_stock_trader\requirements-windows.txt
+  py -3-32 -m kr_stock_trader -c config.json --broker daishin balance
+  py -3-32 -m kr_stock_trader -c config.json --broker daishin run
+  ```
+
+참고
+- 조회 15초당 60건, 주문 15초당 20건 제한을 CYBOS 가 알려 주는 남은 횟수로 자동 대기합니다.
+- 계좌가 여러 개면 `DAISHIN_ACCOUNT` 환경변수로 지정하세요(비우면 첫 계좌).
+- 모의투자/실전 구분은 CYBOS 로그인으로 결정됩니다. 설정의 `env` 는 이 프로그램의 실전 주문 안전장치(`--live`)에만 쓰이니 로그인한 쪽과 맞춰 주세요.
 
 ## 1) 계좌 없이 바로 체험 (가상 시세)
 
@@ -110,6 +135,8 @@ kr_stock_trader/
   brokers/kiwoom.py   키움 REST API (ka10001/ka10004/ka10080/ka10081, kt00001/kt00018, kt10000/kt10001)
   brokers/ls.py       LS증권 Open API (t1101/t8410/t8412, t0424/CSPAQ12200, CSPAT00601)
   brokers/db.py       DB증권 Open API (현재가/일·분차트, 잔고/예수금, 주식종합주문)
+  brokers/daishin.py  대신증권 CYBOS Plus COM (StockMst, StockChart, CpTd6033, CpTdNew5331A, CpTd0311)
+  windows/            대신증권용 Windows 실행기 (run_daishin.bat)
   brokers/paper.py    로컬 모의 브로커 + 가상 시세
   strategies.py       MA 크로스 / RSI / MA+RSI
   risk.py             수량 계산, 청산 조건, 진입 차단 조건
