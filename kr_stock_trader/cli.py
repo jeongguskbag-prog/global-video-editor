@@ -14,7 +14,7 @@ import time
 from datetime import timedelta
 
 from .backtest import run_backtest
-from .brokers import Broker, BrokerError, DaishinBroker, DbBroker, KisBroker, KiwoomBroker, LsBroker, PaperBroker
+from .brokers import Broker, BrokerError, DaishinBroker, DbBroker, KisBroker, KiwoomBroker, LsBroker, NhBroker, PaperBroker, ShinhanBroker
 from .config import AppConfig, env
 from .engine import AutoTradeEngine
 from .history import TradeHistoryStore
@@ -24,7 +24,7 @@ from .notifier import TelegramNotifier
 from .strategies import STRATEGIES, build_strategy
 
 
-BROKERS = ["paper", "kis", "kiwoom", "ls", "db", "daishin"]
+BROKERS = ["paper", "kis", "kiwoom", "ls", "db", "nh", "daishin", "shinhan"]
 
 
 def make_broker(name: str, cfg: AppConfig) -> Broker:
@@ -36,6 +36,10 @@ def make_broker(name: str, cfg: AppConfig) -> Broker:
         return LsBroker(env("LS_APP_KEY"), env("LS_APP_SECRET"), cfg.env)
     if name == "db":
         return DbBroker(env("DB_APP_KEY"), env("DB_APP_SECRET"), cfg.env)
+    if name == "nh":
+        return NhBroker(env("NH_APP_KEY"), env("NH_APP_SECRET"), env("NH_ACCOUNT"), cfg.env)
+    if name == "shinhan":
+        return ShinhanBroker(env("SHINHAN_ACCOUNT"), env("SHINHAN_ACCOUNT_PASSWORD"), cfg.env)
     if name == "daishin":
         return DaishinBroker(env("DAISHIN_ACCOUNT"), cfg.env)
     if name == "paper":

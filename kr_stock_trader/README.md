@@ -31,7 +31,9 @@ pip install -r kr_stock_trader/requirements.txt
 | `kiwoom` | 키움증권 (REST) | `KIWOOM_APP_KEY`, `KIWOOM_SECRET_KEY` | 별도 서버 (`env: demo`) |
 | `ls` | LS증권 (구 이베스트) | `LS_APP_KEY`, `LS_APP_SECRET` | 같은 서버, **모의투자용 App Key** 사용 |
 | `db` | DB증권 (구 DB금융투자) | `DB_APP_KEY`, `DB_APP_SECRET` | 같은 서버, **모의투자용 App Key** 사용 |
+| `nh` | NH투자증권 NHPLUG (나무·QV 공용 REST) | `NH_APP_KEY`, `NH_APP_SECRET` (`NH_ACCOUNT` 는 선택) | 별도 서버, 계좌구분 03 계좌 자동 선택 |
 | `daishin` | 대신증권 CYBOS Plus (**Windows 전용**) | 없음 (`DAISHIN_ACCOUNT` 는 선택) | CYBOS Plus 로그인 시 '모의투자 접속' |
+| `shinhan` | 신한투자증권 신한i indi (**Windows 전용**) | `SHINHAN_*` (아래 참고) | indi 모의투자 계정 |
 | `paper` | 로컬 모의 | 없음 | 항상 모의 |
 
 LS·DB는 실전/모의 주소가 같고 발급받은 키 종류로 구분됩니다. `env` 값은 이 프로그램의 실전 주문 안전장치(`--live`)에만 쓰이므로,
@@ -42,7 +44,7 @@ LS·DB는 실전/모의 주소가 같고 발급받은 키 종류로 구분됩니
 | 증권사 | 이유 |
 |---|---|
 | 미래에셋, 삼성, NH투자(나무), KB, 신한, 토스, 카카오페이 등 | 개인에게 공개된 REST 주문 API가 없음 (앱·HTS 전용) |
-| NH (QV Open API), 신한 (indi) | Windows 전용 OCX 방식. 대신증권처럼 Windows 모듈로 추가 가능하지만 아직 미포함 |
+| NH QV Open API (wmca.dll) | NH 가 공식 REST API(NHPLUG)로 대체했으므로 `nh` 로 연결 (Windows 포함 어디서나 동작) |
 
 ## 대신증권 (Windows)
 
@@ -67,6 +69,45 @@ LS·DB는 실전/모의 주소가 같고 발급받은 키 종류로 구분됩니
 - 조회 15초당 60건, 주문 15초당 20건 제한을 CYBOS 가 알려 주는 남은 횟수로 자동 대기합니다.
 - 계좌가 여러 개면 `DAISHIN_ACCOUNT` 환경변수로 지정하세요(비우면 첫 계좌).
 - 모의투자/실전 구분은 CYBOS 로그인으로 결정됩니다. 설정의 `env` 는 이 프로그램의 실전 주문 안전장치(`--live`)에만 쓰이니 로그인한 쪽과 맞춰 주세요.
+
+## NH투자증권 (NHPLUG)
+
+NH 는 예전 Windows 전용 QV Open API(wmca.dll) 대신 공식 REST API(NHPLUG)를 제공합니다.
+Windows·Mac·Linux 어디서나 동작하고 32비트 Python 도 필요 없습니다.
+
+1. [NHPLUG 포털](https://www.nhplug.com)에서 App Key/Secret 발급 (모의투자는 교육 이수 후 모의투자 계좌 개설)
+2. `NH_APP_KEY`, `NH_APP_SECRET` 설정. 계좌는 `env` 에 맞는 계좌(실전 01·02 / 모의 03)를 자동으로 고르며,
+   직접 고르려면 `NH_ACCOUNT` 지정
+3. `python -m kr_stock_trader -c config.json --broker nh balance`
+
+## 신한투자증권 (indi, Windows)
+
+신한i indi 는 ActiveX 컨트롤을 PyQt5 로 띄워 쓰는 Windows 전용 방식입니다.
+
+준비물: 신한i indi 설치 + API 사용 신청, **32비트** Python, 관리자 권한. 환경변수:
+
+| 변수 | 내용 |
+|---|---|
+| `SHINHAN_ID` / `SHINHAN_PASSWORD` / `SHINHAN_CERT_PASSWORD` | indi 자동 로그인 (공동인증서 비밀번호) |
+| `SHINHAN_ACCOUNT` / `SHINHAN_ACCOUNT_PASSWORD` | 거래 계좌번호 / 계좌 비밀번호 |
+| `SHINHAN_STARTER` | GiExpertStarter.exe 경로 (기본 `C:\SHINHAN-i\indi\GiExpertStarter.exe`) |
+| `SHINHAN_ORDER_ENABLED` | 필드 확인 후 `1` 로 설정해야 주문 가능 |
+| `SHINHAN_FIELDS_FILE` | 필드 순번 수정용 JSON (선택) |
+
+⚠️ **처음에는 반드시 필드 확인부터 하세요.** indi 의 TR 입출력 순번은 공개 자료로 일부만 확인됐습니다
+(차트 TR_SCHART 는 확인, 잔고·예수금·주문 순번은 indi 도움말과 대조 필요). 그래서 주문은 기본적으로 꺼져 있습니다.
+
+1. `kr_stock_trader\windows\run_shinhan.bat` 을 관리자 권한으로 실행 → 메뉴 **6. 필드 확인**
+   (또는 `py -3-32 kr_stock_trader\windows\shinhan_probe.py 005930`) — 차트·잔고·예수금 원시 응답을 칸 번호와 함께 출력
+2. indi 도움말의 TR 설명과 비교해 `brokers/shinhan.py` 의 `FIELDS` 와 다른 칸이 있으면 JSON 으로 덮어쓰기
+   ```json
+   {"balance": {"out": {"qty": 3, "avg_price": 7}}, "cash": {"single": {"orderable": 4}}}
+   ```
+   저장 후 `SHINHAN_FIELDS_FILE` 로 경로 지정
+3. 잔고 조회(메뉴 1)가 HTS 와 같게 나오고, 모의투자에서 주문 TR(SABA101U1) 입력 순번까지 확인했으면
+   `SHINHAN_ORDER_ENABLED=1` 로 주문을 켭니다.
+
+현재가는 확인된 호가 TR 이 없어 1분봉 마지막 종가를 사용하므로, 신한에서는 호가 스프레드 필터가 적용되지 않습니다.
 
 ## 1) 계좌 없이 바로 체험 (가상 시세)
 
@@ -135,8 +176,10 @@ kr_stock_trader/
   brokers/kiwoom.py   키움 REST API (ka10001/ka10004/ka10080/ka10081, kt00001/kt00018, kt10000/kt10001)
   brokers/ls.py       LS증권 Open API (t1101/t8410/t8412, t0424/CSPAQ12200, CSPAT00601)
   brokers/db.py       DB증권 Open API (현재가/일·분차트, 잔고/예수금, 주식종합주문)
+  brokers/nh.py       NH투자증권 NHPLUG REST (currentPrice, period, balance, cashBuy/cashSell)
   brokers/daishin.py  대신증권 CYBOS Plus COM (StockMst, StockChart, CpTd6033, CpTdNew5331A, CpTd0311)
-  windows/            대신증권용 Windows 실행기 (run_daishin.bat)
+  brokers/shinhan.py  신한 indi ActiveX (TR_SCHART, SABA200QB, SABA655Q1, SABA101U1) — 필드 순번 확인 필요
+  windows/            Windows 실행기 (run_daishin.bat, run_shinhan.bat) + 신한 필드 확인 도구
   brokers/paper.py    로컬 모의 브로커 + 가상 시세
   strategies.py       MA 크로스 / RSI / MA+RSI
   risk.py             수량 계산, 청산 조건, 진입 차단 조건
